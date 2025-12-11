@@ -17,6 +17,7 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path
+from django.http import HttpResponse
 
 urlpatterns = [
     path("api/admin/", admin.site.urls),
@@ -26,4 +27,7 @@ urlpatterns = [
     path("api/foods/", include("foods.urls")),
     path("api/forum/", include("forum.urls")),
     path("api/meal-planner/", include("meal_planner.urls")),
+    # Health checks for load balancer (both root and api-scoped)
+    path("healthz/", lambda request: HttpResponse("ok")),
+    path("api/healthz/", lambda request: HttpResponse("ok")),
 ]
