@@ -35,6 +35,8 @@ class UserTag(models.Model):
     certificate = models.FileField(
         upload_to=certificate_upload_to, null=True, blank=True
     )
+    # GCS URI for certificate (e.g., gs://bucket/certificates/<token>.<ext>)
+    certificate_gcs_uri = models.CharField(max_length=512, null=True, blank=True)
 
     class Meta:
         unique_together = ("user", "tag")
@@ -69,6 +71,8 @@ class User(AbstractUser):
     profile_image = models.ImageField(
         upload_to=profile_image_upload_to, null=True, blank=True
     )
+    # GCS URI for profile (e.g., gs://bucket/profile_images/<token>.<ext>)
+    profile_image_gcs_uri = models.CharField(max_length=512, null=True, blank=True)
 
     current_meal_plan = models.ForeignKey(
         "meal_planner.MealPlan",

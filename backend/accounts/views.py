@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.pagination import PageNumberPagination
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponseRedirect
 from django.conf import settings
 from django.db.models import Q
 
@@ -32,6 +32,10 @@ from .models import User, Allergen, Tag, UserTag, Follow
 from forum.models import Like, Post, Recipe
 from forum.serializers import PostSerializer, RecipeSerializer
 import os
+from google.cloud import storage
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UserListView(APIView):
@@ -343,6 +347,13 @@ class ProfileImageView(APIView):
         user = request.user
         image = request.FILES.get("profile_image")
 
+        logger.info(
+            "Profile image upload attempt: user_id=%s, size=%s, content_type=%s",
+            getattr(user, "id", None),
+            getattr(image, "size", None),
+            getattr(image, "content_type", None),
+        )
+
         if not image:
             return Response(
                 {"detail": "No image file uploaded."},
@@ -365,38 +376,81 @@ class ProfileImageView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        #  Save valid image
-        upload_serializer = PhotoUploadSerializer(user, data=request.data, partial=True)
-        if upload_serializer.is_valid():
-            upload_serializer.save()
-            # Return the URL using the read serializer
+        # Upload to GCS and store gs:// URI
+        bucket_name = os.environ.get("GCS_MEDIA_BUCKET")
+        credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not bucket_name or not credentials:
+            logger.warning(
+                "GCS config missing for profile image upload: GCS_MEDIA_BUCKET set=%s, GOOGLE_APPLICATION_CREDENTIALS set=%s",
+                bool(bucket_name),
+                bool(credentials),
+            )
+            return Response(
+                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET and GOOGLE_APPLICATION_CREDENTIALS."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            ext = ".jpg" if image.content_type == "image/jpeg" else ".png"
+            object_name = f"profile_images/{str(user.profile_image_token)}{ext}"
+            blob = bucket.blob(object_name)
+            blob.cache_control = "public, max-age=86400"
+            blob.upload_from_file(image, content_type=image.content_type)
+
+            # Save URI on user and clear local field
+            if hasattr(user, "profile_image_gcs_uri"):
+                user.profile_image_gcs_uri = f"gs://{bucket_name}/{object_name}"
+                user.profile_image = None
+                user.save(update_fields=["profile_image_gcs_uri", "profile_image"])
+            else:
+                # Fallback: keep existing flow if field missing
+                upload_serializer = PhotoUploadSerializer(user, data=request.data, partial=True)
+                if upload_serializer.is_valid():
+                    upload_serializer.save()
+
             read_serializer = PhotoSerializer(user)
             return Response(read_serializer.data, status=status.HTTP_200_OK)
-        return Response(upload_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.exception(
+                "GCS upload failed for profile image: user_id=%s, error=%s",
+                getattr(user, "id", None),
+                str(e),
+            )
+            return Response({"detail": f"GCS upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def delete(self, request):
         user = request.user
 
-        if not user.profile_image:
+        if not user.profile_image and not getattr(user, "profile_image_gcs_uri", None):
             return Response(
                 {"detail": "No profile image to remove."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        #  Get full path to the image file
-        image_path = user.profile_image.path
-
-        #  Clear the field and save to DB
-        user.profile_image = None
-        user.save()
-
-        #  Delete the actual file if it exists
-        if os.path.exists(image_path):
+        # If in GCS, delete blob; else local
+        gcs_uri = getattr(user, "profile_image_gcs_uri", None)
+        if gcs_uri and gcs_uri.startswith("gs://"):
             try:
-                os.remove(image_path)
+                _, path_part = gcs_uri.split("gs://", 1)
+                bucket_name, object_name = path_part.split("/", 1)
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                blob = bucket.blob(object_name)
+                blob.delete()
             except Exception as e:
-                # Optional: log the error but still return success
-                print(f"Error deleting image file: {e}")
+                print(f"GCS delete error: {e}")
+            user.profile_image_gcs_uri = None
+            user.save(update_fields=["profile_image_gcs_uri"])
+        else:
+            image_path = user.profile_image.path
+            user.profile_image = None
+            user.save()
+            if os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                except Exception as e:
+                    print(f"Error deleting image file: {e}")
 
         return Response(
             {"detail": "Profile image removed successfully."}, status=status.HTTP_200_OK
@@ -411,6 +465,14 @@ class CertificateView(APIView):
         user = request.user
         tag_id = request.data.get("tag_id")
         certificate = request.FILES.get("certificate")
+
+        logger.info(
+            "Certificate upload attempt: user_id=%s, tag_id=%s, size=%s, content_type=%s",
+            getattr(user, "id", None),
+            tag_id,
+            getattr(certificate, "size", None),
+            getattr(certificate, "content_type", None),
+        )
 
         if not tag_id:
             return Response(
@@ -449,13 +511,41 @@ class CertificateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        #  Save certificate to UserTag (not Tag)
-        user_tag.certificate = certificate
-        user_tag.save()
-
-        #  Return updated tag info with user context
-        serializer = TagOutputSerializer(tag, context={"user": user})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Upload certificate to GCS and store gs:// URI
+        bucket_name = os.environ.get("GCS_MEDIA_BUCKET")
+        credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not bucket_name or not credentials:
+            logger.warning(
+                "GCS config missing for certificate upload: GCS_MEDIA_BUCKET set=%s, GOOGLE_APPLICATION_CREDENTIALS set=%s",
+                bool(bucket_name),
+                bool(credentials),
+            )
+            return Response(
+                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET and GOOGLE_APPLICATION_CREDENTIALS."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
+            ext = ext_map.get(certificate.content_type, ".bin")
+            object_name = f"certificates/{str(user_tag.certificate_token)}{ext}"
+            blob = bucket.blob(object_name)
+            blob.cache_control = "private, max-age=0"
+            blob.upload_from_file(certificate, content_type=certificate.content_type)
+            user_tag.certificate_gcs_uri = f"gs://{bucket_name}/{object_name}"
+            user_tag.certificate = None
+            user_tag.save(update_fields=["certificate_gcs_uri", "certificate"])
+            serializer = TagOutputSerializer(tag, context={"user": user})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception(
+                "GCS upload failed for certificate: user_id=%s, tag_id=%s, error=%s",
+                getattr(user, "id", None),
+                tag_id,
+                str(e),
+            )
+            return Response({"detail": f"GCS upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def delete(self, request):
         """
@@ -481,8 +571,20 @@ class CertificateView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Remove certificate file if it exists
-        if user_tag.certificate:
+        # Remove certificate from GCS if present; else local
+        if getattr(user_tag, "certificate_gcs_uri", None) and user_tag.certificate_gcs_uri.startswith("gs://"):
+            try:
+                _, path_part = user_tag.certificate_gcs_uri.split("gs://", 1)
+                bucket_name, object_name = path_part.split("/", 1)
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                blob = bucket.blob(object_name)
+                blob.delete()
+            except Exception as e:
+                print(f"GCS delete error: {e}")
+            user_tag.certificate_gcs_uri = None
+            user_tag.save(update_fields=["certificate_gcs_uri"])
+        elif user_tag.certificate:
             user_tag.certificate.delete(save=False)
             user_tag.certificate = None
             user_tag.save()
@@ -614,19 +716,31 @@ class ServeProfileImageView(APIView):
         except User.DoesNotExist:
             raise Http404("Profile image not found")
 
-        if not user.profile_image:
+        if not user.profile_image and not getattr(user, "profile_image_gcs_uri", None):
             raise Http404("User has no profile image")
 
-        # Build the full path to the file
-        file_path = os.path.join(settings.MEDIA_ROOT, user.profile_image.name)
+        # If stored in GCS, generate a signed URL and redirect
+        gcs_uri = getattr(user, "profile_image_gcs_uri", None)
+        if gcs_uri and gcs_uri.startswith("gs://"):
+            try:
+                _, path_part = gcs_uri.split("gs://", 1)
+                bucket_name, object_name = path_part.split("/", 1)
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                blob = bucket.blob(object_name)
+                expiration = int(os.environ.get("GS_EXPIRATION_SECONDS", "3600"))
+                signed = blob.generate_signed_url(expiration=expiration, method="GET")
+                return HttpResponseRedirect(signed)
+            except Exception as e:
+                print(f"GCS signed URL error: {e}")
+                raise Http404("Profile image file not found")
 
+        # Fallback to local path
+        file_path = os.path.join(settings.MEDIA_ROOT, user.profile_image.name)
         if not os.path.exists(file_path):
             raise Http404("Profile image file not found")
 
-        # Serve the file with proper content type
-        response = FileResponse(open(file_path, "rb"))
-        # Let Django auto-detect content type from file extension
-        return response
+        return FileResponse(open(file_path, "rb"))
 
 
 class ServeCertificateView(APIView):
@@ -645,19 +759,31 @@ class ServeCertificateView(APIView):
         except UserTag.DoesNotExist:
             raise Http404("Certificate not found")
 
-        if not user_tag.certificate:
+        if not user_tag.certificate and not getattr(user_tag, "certificate_gcs_uri", None):
             raise Http404("No certificate file attached")
 
-        # Build the full path to the file
-        file_path = os.path.join(settings.MEDIA_ROOT, user_tag.certificate.name)
+        # If in GCS, generate signed URL and redirect
+        gcs_uri = getattr(user_tag, "certificate_gcs_uri", None)
+        if gcs_uri and gcs_uri.startswith("gs://"):
+            try:
+                _, path_part = gcs_uri.split("gs://", 1)
+                bucket_name, object_name = path_part.split("/", 1)
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                blob = bucket.blob(object_name)
+                expiration = int(os.environ.get("GS_EXPIRATION_SECONDS", "3600"))
+                signed = blob.generate_signed_url(expiration=expiration, method="GET")
+                return HttpResponseRedirect(signed)
+            except Exception as e:
+                print(f"GCS signed URL error: {e}")
+                raise Http404("Certificate file not found")
 
+        # Fallback to local path
+        file_path = os.path.join(settings.MEDIA_ROOT, user_tag.certificate.name)
         if not os.path.exists(file_path):
             raise Http404("Certificate file not found")
 
-        # Serve the file with proper content type
-        response = FileResponse(open(file_path, "rb"))
-        # Let Django auto-detect content type from file extension
-        return response
+        return FileResponse(open(file_path, "rb"))
 
 class FollowUserView(APIView):
     """

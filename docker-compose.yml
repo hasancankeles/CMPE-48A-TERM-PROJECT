@@ -31,9 +31,14 @@ services:
     environment:
       <<: *db-env
       DJANGO_SECRET_KEY: "super-secret-key"
+      # GCS configuration (envs inside container)
+      GCS_MEDIA_BUCKET: ${GCS_MEDIA_BUCKET:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /credentials/gcp.json
     volumes:
       - static_volume:/project/staticfiles
       - media_volume:/project/media
+      # Mount service account key read-only
+      - ./term-project-480817-87161b6b8fbc.json:/credentials/gcp.json:ro
 
   frontend:
     build:

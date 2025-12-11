@@ -183,9 +183,10 @@ class PhotoSerializer(serializers.ModelSerializer):
         fields = ["profile_image"]
 
     def get_profile_image(self, obj):
-        """Return the secure endpoint URL for profile image"""
-        if obj.profile_image:
-            # Return relative URL - works in all environments
+        """Return the endpoint URL which serves profile image (GCS-aware)."""
+        # Always route through the endpoint; it knows how to serve from GCS if set
+        # Token is stable; the view will generate a signed URL if needed
+        if obj.profile_image or obj.profile_image_gcs_uri:
             return f"/api/users/profile-image/{obj.profile_image_token}/"
         return None
 
