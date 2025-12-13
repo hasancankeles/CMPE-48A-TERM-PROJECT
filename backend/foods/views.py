@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.conf import settings as django_settings
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from foods.models import FoodEntry, FoodProposal, ImageCache
@@ -11,6 +12,7 @@ from django.db.models import Q
 import requests
 import sys
 import os
+import json
 import traceback
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework import status
@@ -19,7 +21,6 @@ from django.core.files.base import ContentFile
 from django.utils.http import urlencode
 import hashlib
 from urllib.parse import unquote
-from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(
     os.path.join(os.path.dirname(__file__), "..", "api", "db_initialization")
@@ -28,10 +29,85 @@ sys.path.append(
 from scraper import make_request, extract_food_info, get_fatsecret_image_url
 from nutrition_score import calculate_nutrition_score
 
-# Global thread pool for background image caching (max 5 concurrent downloads)
-_image_cache_executor = ThreadPoolExecutor(
-    max_workers=5, thread_name_prefix="image_cache"
-)
+# Lazy-loaded Pub/Sub publisher (initialized on first use)
+_pubsub_publisher = None
+
+
+def _get_pubsub_publisher():
+    """
+    Lazily initialize the Pub/Sub publisher client.
+    Returns None if GCP is not configured.
+    """
+    global _pubsub_publisher
+    if _pubsub_publisher is None:
+        project_id = getattr(django_settings, "GCP_PROJECT_ID", "")
+        if project_id:
+            try:
+                from google.cloud import pubsub_v1
+                _pubsub_publisher = pubsub_v1.PublisherClient()
+            except Exception as e:
+                print(f"Failed to initialize Pub/Sub client: {e}")
+                return None
+    return _pubsub_publisher
+
+
+def _publish_image_cache_request(image_url: str, url_hash: str) -> bool:
+    """
+    Publish a message to Pub/Sub to request image caching.
+    Returns True if published successfully, False otherwise.
+    """
+    project_id = getattr(django_settings, "GCP_PROJECT_ID", "")
+    topic_name = getattr(django_settings, "PUBSUB_IMAGE_CACHE_TOPIC", "image-cache-requests")
+    
+    if not project_id:
+        print("GCP_PROJECT_ID not configured, skipping Pub/Sub publish")
+        return False
+    
+    publisher = _get_pubsub_publisher()
+    if not publisher:
+        return False
+    
+    try:
+        topic_path = publisher.topic_path(project_id, topic_name)
+        message_data = json.dumps({
+            "url": image_url,
+            "hash": url_hash
+        }).encode("utf-8")
+        
+        future = publisher.publish(topic_path, message_data)
+        future.result(timeout=5)  # Wait up to 5 seconds for publish
+        print(f"Published image cache request for: {image_url[:50]}...")
+        return True
+    except Exception as e:
+        print(f"Failed to publish to Pub/Sub: {e}")
+        return False
+
+
+def _get_gcs_cached_image_url(url_hash: str) -> str | None:
+    """
+    Check if an image exists in GCS cache and return its public URL.
+    Returns None if not found or GCS is not configured.
+    """
+    bucket_name = getattr(django_settings, "GCS_IMAGE_CACHE_BUCKET", "")
+    if not bucket_name:
+        return None
+    
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        
+        # Check common extensions
+        for ext in [".jpg", ".png", ".webp", ".gif"]:
+            blob_name = f"image-cache/{url_hash}{ext}"
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                # Return the public URL
+                return f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
+        return None
+    except Exception as e:
+        print(f"Error checking GCS cache: {e}")
+        return None
 
 
 class FoodCatalog(ListAPIView):
@@ -351,55 +427,6 @@ def food_nutrition_info(request):
         )
 
 
-def _download_and_cache_image(image_url, url_hash):
-    """
-    Background task to download and cache an image.
-    Runs in thread pool to avoid blocking the main request.
-    """
-    try:
-        # Check if already cached (might have been cached by another task)
-        if ImageCache.objects.filter(url_hash=url_hash).exists():
-            return
-
-        # Download the image
-        img_response = requests.get(image_url, timeout=10, stream=True)
-        img_response.raise_for_status()
-
-        # Get content type
-        content_type = img_response.headers.get("Content-Type", "image/jpeg")
-
-        # Read image content
-        image_content = b""
-        for chunk in img_response.iter_content(chunk_size=8192):
-            image_content += chunk
-
-        # Determine file extension
-        ext_map = {
-            "image/jpeg": ".jpg",
-            "image/jpg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-        }
-        ext = ext_map.get(content_type, ".jpg")
-
-        # Create unique filename using hash
-        filename = f"{url_hash}{ext}"
-
-        # Save to cache
-        cache_entry = ImageCache.objects.create(
-            url_hash=url_hash,
-            original_url=image_url,
-            content_type=content_type,
-            file_size=len(image_content),
-            access_count=0,
-        )
-        cache_entry.cached_file.save(filename, ContentFile(image_content))
-
-        print(f"Successfully cached image: {image_url[:50]}...")
-
-    except Exception as e:
-        print(f"Failed to cache image {image_url[:50]}...: {str(e)}")
 
 
 @api_view(["GET"])
@@ -407,9 +434,14 @@ def _download_and_cache_image(image_url, url_hash):
 def image_proxy(request):
     """
     GET /api/foods/image-proxy/?url={external_url}
-    Proxies external food images with local caching for improved performance.
-    - If image is cached: serves from local storage
-    - If not cached: redirects to original URL and submits caching task to thread pool
+    Proxies external food images with caching via Google Cloud Storage.
+    
+    Flow:
+    1. Check if image is cached in GCS (via Cloud Function)
+    2. If cached: redirect to GCS URL
+    3. If not cached: publish to Pub/Sub for async caching, redirect to original URL
+    
+    The Cloud Function (triggered by Pub/Sub) handles the actual download and upload to GCS.
     """
     image_url = request.query_params.get("url")
 
@@ -433,15 +465,20 @@ def image_proxy(request):
     url_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
 
     try:
-        # Check if image is already cached using hash
-        cache_entry = ImageCache.objects.filter(url_hash=url_hash).first()
+        # First, check if image exists in GCS cache
+        gcs_url = _get_gcs_cached_image_url(url_hash)
+        if gcs_url:
+            # Redirect to GCS-hosted image
+            return HttpResponseRedirect(gcs_url)
 
+        # Fallback: Check local ImageCache (for backwards compatibility)
+        cache_entry = ImageCache.objects.filter(url_hash=url_hash).first()
         if cache_entry and cache_entry.cached_file:
             # Update access statistics
             cache_entry.access_count += 1
             cache_entry.save(update_fields=["access_count", "last_accessed"])
 
-            # Serve cached image
+            # Serve cached image from local storage
             response = FileResponse(
                 cache_entry.cached_file.open("rb"),
                 content_type=cache_entry.content_type,
@@ -449,8 +486,8 @@ def image_proxy(request):
             response["Cache-Control"] = "public, max-age=86400"  # Cache for 24 hours
             return response
 
-        # Image not cached - submit caching task to thread pool and redirect immediately
-        _image_cache_executor.submit(_download_and_cache_image, image_url, url_hash)
+        # Image not cached anywhere - publish to Pub/Sub for async caching
+        _publish_image_cache_request(image_url, url_hash)
 
         # Redirect to original URL for immediate response
         return HttpResponseRedirect(image_url)

@@ -953,3 +953,28 @@ export const apiClient = {
       }, true),
   },
 };
+/**
+ * Generate a proxied image URL that goes through our backend image cache.
+ * This enables Cloud Function-based caching to GCS for better performance.
+ * 
+ * @param imageUrl - The original external image URL
+ * @returns The proxied URL that routes through /api/foods/image-proxy/
+ */
+export function getProxiedImageUrl(imageUrl: string | undefined | null): string | null {
+  if (!imageUrl) return null;
+  
+  // Skip proxying for local URLs (already served locally)
+  if (
+    imageUrl.startsWith('/media/') ||
+    imageUrl.startsWith('/static/') ||
+    imageUrl.includes('localhost') ||
+    imageUrl.includes('127.0.0.1')
+  ) {
+    return imageUrl;
+  }
+  
+  // Route external URLs through the image proxy (relative URL)
+  const encodedUrl = encodeURIComponent(imageUrl);
+  return `/api/foods/image-proxy/?url=${encodedUrl}`;
+}
+

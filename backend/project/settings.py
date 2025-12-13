@@ -215,3 +215,9 @@ CORS_ALLOW_CREDENTIALS = True
 DEEPL_API_KEY = os.environ.get(
     "DEEPL_API_KEY", "7225230f-59a5-42eb-b576-7fb2d5cf2db1:fx"
 )
+
+# Google Cloud Platform configuration
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
+GCS_MEDIA_BUCKET = os.environ.get("GCS_MEDIA_BUCKET", "")  # For profile/certificate pictures
+GCS_IMAGE_CACHE_BUCKET = os.environ.get("GCS_IMAGE_CACHE_BUCKET", "")  # For food image caching
+PUBSUB_IMAGE_CACHE_TOPIC = os.environ.get("PUBSUB_IMAGE_CACHE_TOPIC", "image-cache-requests")
