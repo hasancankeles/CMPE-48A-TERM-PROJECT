@@ -21,9 +21,9 @@ def cache_image(event, context):
         print(f"Invalid Pub/Sub payload: {e}")
         return
 
-    bucket_name = os.environ.get("GCS_MEDIA_BUCKET")
+    bucket_name = os.environ.get("GCS_IMAGE_CACHE_BUCKET")
     if not bucket_name:
-        print("GCS_MEDIA_BUCKET is not set; skipping")
+        print("GCS_IMAGE_CACHE_BUCKET is not set; skipping")
         return
 
     try:
