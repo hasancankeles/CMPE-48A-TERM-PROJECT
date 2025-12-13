@@ -51,6 +51,30 @@ variable "mysql_disk_gb" {
   default     = 20
 }
 
+variable "locust_machine_type" {
+  description = "Machine type for the Locust load test VM"
+  type        = string
+  default     = "e2-standard-2"
+}
+
+variable "locust_zone" {
+  description = "Zone for the Locust VM"
+  type        = string
+  default     = "us-central1-a"
+}
+
+variable "locust_disk_gb" {
+  description = "Boot disk size for the Locust VM"
+  type        = number
+  default     = 20
+}
+
+variable "locust_allow_cidr" {
+  description = "CIDR(s) allowed to reach the Locust UI (8089). Restrict to your IP."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "artifact_repo" {
   description = "Artifact Registry repository name"
   type        = string

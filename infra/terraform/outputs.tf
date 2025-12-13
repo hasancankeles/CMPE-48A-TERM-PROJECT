@@ -21,3 +21,7 @@ output "bucket_name" {
 output "mysql_vm_ip" {
   value = google_compute_instance.mysql.network_interface[0].network_ip
 }
+
+output "locust_vm_ip" {
+  value = google_compute_instance.locust.network_interface[0].access_config[0].nat_ip
+}

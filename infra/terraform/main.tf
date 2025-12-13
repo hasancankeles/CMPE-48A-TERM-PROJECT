@@ -110,3 +110,36 @@ resource "google_compute_firewall" "mysql_from_gke" {
   target_tags   = ["mysql"]
   source_ranges = [google_container_cluster.gke.cluster_ipv4_cidr]
 }
+
+resource "google_compute_instance" "locust" {
+  name         = "locust-vm"
+  machine_type = var.locust_machine_type
+  zone         = var.locust_zone
+  tags         = ["locust"]
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      type  = "pd-standard"
+      size  = var.locust_disk_gb
+    }
+  }
+
+  network_interface {
+    network = "default"
+    access_config {} # external IP for the UI
+  }
+}
+
+resource "google_compute_firewall" "locust_ui" {
+  name    = "allow-locust-ui"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["8089"]
+  }
+
+  target_tags   = ["locust"]
+  source_ranges = var.locust_allow_cidr
+}
