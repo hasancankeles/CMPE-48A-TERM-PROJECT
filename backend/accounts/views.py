@@ -410,16 +410,11 @@ class ProfileImageView(APIView):
             )
 
         # Upload to GCS and store gs:// URI
-        bucket_name = os.environ.get("GCS_MEDIA_BUCKET")
-        credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not bucket_name or not credentials:
-            logger.warning(
-                "GCS config missing for profile image upload: GCS_MEDIA_BUCKET set=%s, GOOGLE_APPLICATION_CREDENTIALS set=%s",
-                bool(bucket_name),
-                bool(credentials),
-            )
+        bucket_name = os.environ.get("GCS_MEDIA_BUCKET") or os.environ.get("CLOUD_STORAGE_BUCKET")
+        if not bucket_name:
+            logger.warning("GCS config missing for profile image upload: no bucket configured")
             return Response(
-                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET and GOOGLE_APPLICATION_CREDENTIALS."},
+                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET or CLOUD_STORAGE_BUCKET."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         try:
@@ -545,16 +540,11 @@ class CertificateView(APIView):
             )
 
         # Upload certificate to GCS and store gs:// URI
-        bucket_name = os.environ.get("GCS_MEDIA_BUCKET")
-        credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not bucket_name or not credentials:
-            logger.warning(
-                "GCS config missing for certificate upload: GCS_MEDIA_BUCKET set=%s, GOOGLE_APPLICATION_CREDENTIALS set=%s",
-                bool(bucket_name),
-                bool(credentials),
-            )
+        bucket_name = os.environ.get("GCS_MEDIA_BUCKET") or os.environ.get("CLOUD_STORAGE_BUCKET")
+        if not bucket_name:
+            logger.warning("GCS config missing for certificate upload: no bucket configured")
             return Response(
-                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET and GOOGLE_APPLICATION_CREDENTIALS."},
+                {"detail": "GCS configuration missing. Set GCS_MEDIA_BUCKET or CLOUD_STORAGE_BUCKET."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         try:

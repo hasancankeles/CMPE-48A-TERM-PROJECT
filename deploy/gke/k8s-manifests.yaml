@@ -27,6 +27,7 @@ data:
   CLOUD_STORAGE_BUCKET: "nutrihub-static-media"
   STATIC_URL: "https://storage.googleapis.com/nutrihub-static-media/static/"
   MEDIA_URL: "https://storage.googleapis.com/nutrihub-static-media/media/"
+  GCS_UPLOAD_BUCKET: "baris-media-dev"
 ---
 apiVersion: v1
 kind: Secret
