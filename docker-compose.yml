@@ -31,6 +31,7 @@ services:
     environment:
       <<: *db-env
       DJANGO_SECRET_KEY: "super-secret-key"
+      CRON_STATS_TOKEN: "${CRON_STATS_TOKEN:-choose-a-strong-token}"
       # GCP configuration
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:-term-project-480817}
       GCS_MEDIA_BUCKET: ${GCS_MEDIA_BUCKET:-baris-media-dev}

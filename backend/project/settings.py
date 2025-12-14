@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "rest_framework_simplejwt",
+    "analytics",
     "accounts",
     "api",
     "foods",
@@ -216,6 +217,9 @@ DEEPL_API_KEY = os.environ.get(
     "DEEPL_API_KEY", "7225230f-59a5-42eb-b576-7fb2d5cf2db1:fx"
 )
 
+# Shared secret used by Cloud Scheduler/Function when triggering daily stats.
+# Configure in K8s secret as CRON_STATS_TOKEN.
+CRON_STATS_TOKEN = os.environ.get("CRON_STATS_TOKEN", "")
 # Google Cloud Platform configuration
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 GCS_MEDIA_BUCKET = os.environ.get("GCS_MEDIA_BUCKET", "")  # For profile/certificate pictures

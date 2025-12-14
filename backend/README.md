@@ -104,6 +104,11 @@ This project uses OpenAI's image generation API to create food images. The image
 python ./backend/manage.py test api  # runs tests and prints results/errors to terminal
 ```
 
+## Daily stats (Cloud Run)
+- Stats are now handled by the Cloud Run worker under `serverless/stats_worker` (endpoint `/run`, header `X-Cron-Auth=<CRON_STATS_TOKEN>`).
+- Build/push the worker image, deploy via Terraform (`enable_stats_worker=true`) and point Cloud Scheduler to the Cloud Run URL.
+- The legacy GKE stats endpoint is disabled/removed.
+
 ## Contribution Guide
 
 Please format your changes with `black`:
