@@ -11,6 +11,7 @@ from .views import (
     get_random_meal,
     food_nutrition_info,
     image_proxy,
+    image_cache_callback,
 )
 from .admin import FoodProposalModerationViewSet
 
@@ -35,5 +36,6 @@ urlpatterns = [
     path("catalog/", FoodCatalog.as_view(), name="food-catalog"),
     path("food/nutrition-info/", food_nutrition_info, name="food_nutrition_info"),
     path("image-proxy/", image_proxy, name="image_proxy"),
+    path("image-cache-callback/", image_cache_callback, name="image_cache_callback"),
     path("moderation/", include(moderation_router.urls), name="moderation"),
 ]

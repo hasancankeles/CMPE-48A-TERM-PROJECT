@@ -74,6 +74,38 @@ export interface UserResponse {
   profile_image?: string;
   is_staff?: boolean;
   is_superuser?: boolean;
+  badges?: Badge[];
+  badges_updated_at?: string | null;
+}
+
+export interface Badge {
+  type: string;
+  name: string;
+  description: string;
+  icon?: string;
+  threshold?: number;
+  earned_at?: string | null;
+}
+
+export interface BadgeStats {
+  recipe_count: number;
+  total_likes: number;
+  post_count: number;
+}
+
+export interface UserBadgesResponse {
+  user_id: number;
+  username: string;
+  badges: Badge[];
+  stats: BadgeStats;
+  badges_updated_at?: string | null;
+}
+
+export interface RecalculateBadgesResponse {
+  message?: string;
+  badges: Badge[];
+  stats: BadgeStats;
+  cloud_function_triggered?: boolean;
 }
 
 // pagination types
@@ -390,6 +422,19 @@ export const apiClient = {
       method: "GET"
     }, true);
   },
+
+  // badges
+  getUserBadges: (userId?: number) => {
+    const suffix = userId ? `${userId}/` : '';
+    return fetchJson<UserBadgesResponse>(`/users/badges/${suffix}`, {
+      method: "GET",
+    }, true);
+  },
+
+  recalculateBadges: () =>
+    fetchJson<RecalculateBadgesResponse>("/users/badges/recalculate/", {
+      method: "POST",
+    }, true),
 
   // get common allergens
   getCommonAllergens: () =>
@@ -953,3 +998,27 @@ export const apiClient = {
       }, true),
   },
 };
+/**
+ * Generate a proxied image URL that goes through our backend image cache.
+ * This enables Cloud Function-based caching to GCS for better performance.
+ * 
+ * @param imageUrl - The original external image URL
+ * @returns The proxied URL that routes through /api/foods/image-proxy/
+ */
+export function getProxiedImageUrl(imageUrl: string | undefined | null): string | null {
+  if (!imageUrl) return null;
+  
+  // Skip proxying for local URLs (already served locally)
+  if (
+    imageUrl.startsWith('/media/') ||
+    imageUrl.startsWith('/static/') ||
+    imageUrl.includes('localhost') ||
+    imageUrl.includes('127.0.0.1')
+  ) {
+    return imageUrl;
+  }
+  
+  // Route external URLs through the image proxy (relative URL)
+  const encodedUrl = encodeURIComponent(imageUrl);
+  return `/api/foods/image-proxy/?url=${encodedUrl}`;
+}

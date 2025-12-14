@@ -32,9 +32,20 @@ services:
       <<: *db-env
       DJANGO_SECRET_KEY: "super-secret-key"
       CRON_STATS_TOKEN: "${CRON_STATS_TOKEN:-choose-a-strong-token}"
+      # GCP configuration
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-term-project-480817}
+      GCS_MEDIA_BUCKET: ${GCS_MEDIA_BUCKET:-baris-media-dev}
+      # Image cache Cloud Function configuration
+      GCS_IMAGE_CACHE_BUCKET: ${GCS_IMAGE_CACHE_BUCKET:-term-project-480817-image-cache}
+      PUBSUB_IMAGE_CACHE_TOPIC: ${PUBSUB_IMAGE_CACHE_TOPIC:-image-cache-requests}
+      # Login email notification Pub/Sub topic
+      PUBSUB_LOGIN_EMAIL_TOPIC: ${PUBSUB_LOGIN_EMAIL_TOPIC:-login-email-notifications}
+      GOOGLE_APPLICATION_CREDENTIALS: /credentials/gcp.json
     volumes:
       - static_volume:/project/staticfiles
       - media_volume:/project/media
+      # Mount service account key read-only
+      - ./term-project-480817-87161b6b8fbc.json:/credentials/gcp.json:ro
 
   frontend:
     build:

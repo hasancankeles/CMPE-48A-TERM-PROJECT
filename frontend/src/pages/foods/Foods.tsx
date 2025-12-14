@@ -1,5 +1,5 @@
 import { Hamburger, Funnel, MagnifyingGlass, X, CaretLeft, CaretRight } from '@phosphor-icons/react'
-import { apiClient , Food} from '../../lib/apiClient';
+import { apiClient, Food } from '../../lib/apiClient';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import FoodDetail from './FoodDetail';
