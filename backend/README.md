@@ -104,11 +104,10 @@ This project uses OpenAI's image generation API to create food images. The image
 python ./backend/manage.py test api  # runs tests and prints results/errors to terminal
 ```
 
-## Daily stats cron hook
-- Stats endpoint: `POST /api/stats/run/` (expects header `X-Cron-Auth=<CRON_STATS_TOKEN>`)
-- Set environment variable `CRON_STATS_TOKEN` (also populated from the Kubernetes secret `backend-secrets` in `deploy/gke/k8s-manifests.yaml`)
-- A GET endpoint `GET /api/stats/latest/` is available for admin users to inspect the latest snapshot.
-- Serverless option: a Cloud Run worker lives under `serverless/stats_worker` and exposes `/run`. Build and deploy the image, then point Cloud Scheduler to it with the same `X-Cron-Auth` token if you prefer to run stats off-cluster.
+## Daily stats (Cloud Run)
+- Stats are now handled by the Cloud Run worker under `serverless/stats_worker` (endpoint `/run`, header `X-Cron-Auth=<CRON_STATS_TOKEN>`).
+- Build/push the worker image, deploy via Terraform (`enable_stats_worker=true`) and point Cloud Scheduler to the Cloud Run URL.
+- The legacy GKE stats endpoint is disabled/removed.
 
 ## Contribution Guide
 

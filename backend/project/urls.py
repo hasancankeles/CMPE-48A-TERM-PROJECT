@@ -27,7 +27,6 @@ urlpatterns = [
     path("api/foods/", include("foods.urls")),
     path("api/forum/", include("forum.urls")),
     path("api/meal-planner/", include("meal_planner.urls")),
-    path("api/stats/", include("analytics.urls")),
     # Health checks for load balancer (both root and api-scoped)
     path("healthz/", lambda request: HttpResponse("ok")),
     path("api/healthz/", lambda request: HttpResponse("ok")),
