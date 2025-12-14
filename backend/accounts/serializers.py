@@ -136,8 +136,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_profile_image(self, obj):
         """Return the secure endpoint URL for profile image"""
-        if obj.profile_image:
-            # Return relative URL - works in all environments
+        if obj.profile_image or getattr(obj, "profile_image_gcs_uri", None):
+            # Return relative URL; view will serve from GCS if needed
             return f"/api/users/profile-image/{obj.profile_image_token}/"
         return None
 
@@ -295,4 +295,3 @@ class NutritionTargetsSerializer(serializers.ModelSerializer):
             return obj.user.metrics.calculate_tdee()
         except:
             return None
-
