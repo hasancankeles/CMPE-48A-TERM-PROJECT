@@ -35,6 +35,7 @@ from forum.serializers import PostSerializer, RecipeSerializer
 import os
 from google.cloud import storage
 import logging
+from google.auth import default as google_auth_default
 
 logger = logging.getLogger(__name__)
 
@@ -748,14 +749,25 @@ class ServeProfileImageView(APIView):
             try:
                 _, path_part = gcs_uri.split("gs://", 1)
                 bucket_name, object_name = path_part.split("/", 1)
-                storage_client = storage.Client()
-                bucket = storage_client.bucket(bucket_name)
-                blob = bucket.blob(object_name)
+
+                # Use default credentials (Workload Identity) and IAM-based signing.
+                credentials, _ = google_auth_default()
+                storage_client = storage.Client(credentials=credentials)
+                blob = storage_client.bucket(bucket_name).blob(object_name)
+
                 expiration = int(os.environ.get("GS_EXPIRATION_SECONDS", "3600"))
-                signed = blob.generate_signed_url(expiration=expiration, method="GET")
+                signed = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="GET",
+                    credentials=credentials,
+                    service_account_email=getattr(
+                        credentials, "service_account_email", None
+                    ),
+                )
                 return HttpResponseRedirect(signed)
             except Exception as e:
-                print(f"GCS signed URL error: {e}")
+                logger.error(f"GCS signed URL error: {e}")
                 raise Http404("Profile image file not found")
 
         # Fallback to local path
@@ -791,14 +803,24 @@ class ServeCertificateView(APIView):
             try:
                 _, path_part = gcs_uri.split("gs://", 1)
                 bucket_name, object_name = path_part.split("/", 1)
-                storage_client = storage.Client()
-                bucket = storage_client.bucket(bucket_name)
-                blob = bucket.blob(object_name)
+
+                credentials, _ = google_auth_default()
+                storage_client = storage.Client(credentials=credentials)
+                blob = storage_client.bucket(bucket_name).blob(object_name)
+
                 expiration = int(os.environ.get("GS_EXPIRATION_SECONDS", "3600"))
-                signed = blob.generate_signed_url(expiration=expiration, method="GET")
+                signed = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="GET",
+                    credentials=credentials,
+                    service_account_email=getattr(
+                        credentials, "service_account_email", None
+                    ),
+                )
                 return HttpResponseRedirect(signed)
             except Exception as e:
-                print(f"GCS signed URL error: {e}")
+                logger.error(f"GCS signed URL error: {e}")
                 raise Http404("Certificate file not found")
 
         # Fallback to local path
