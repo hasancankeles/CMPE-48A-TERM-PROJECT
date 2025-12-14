@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from .models import User, Recipe, Tag, Allergen, UserTag, Report
-from .services import get_user_badges
 
 """
 Serializers are used for converting complex data types, like querysets and model instances, into native Python datatypes.
@@ -143,7 +142,18 @@ class UserSerializer(serializers.ModelSerializer):
         return None
 
     def get_badges(self, obj):
-        return get_user_badges(obj)
+        """
+        Return user badges. Uses pre-calculated badges if available,
+        otherwise calculates them synchronously.
+        """
+        # If badges are pre-calculated (by Cloud Function), return them
+        if obj.badges:
+            return obj.badges
+        
+        # Fallback: calculate synchronously
+        from .badge_utils import calculate_badges_sync
+        badges, _ = calculate_badges_sync(obj)
+        return badges
 
     def get_tags(self, user_obj):
         """Serialize tags with user context for per-user verification"""
@@ -183,9 +193,10 @@ class PhotoSerializer(serializers.ModelSerializer):
         fields = ["profile_image"]
 
     def get_profile_image(self, obj):
-        """Return the secure endpoint URL for profile image"""
-        if obj.profile_image:
-            # Return relative URL - works in all environments
+        """Return the endpoint URL which serves profile image (GCS-aware)."""
+        # Always route through the endpoint; it knows how to serve from GCS if set
+        # Token is stable; the view will generate a signed URL if needed
+        if obj.profile_image or obj.profile_image_gcs_uri:
             return f"/api/users/profile-image/{obj.profile_image_token}/"
         return None
 

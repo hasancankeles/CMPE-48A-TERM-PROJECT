@@ -19,7 +19,7 @@ metadata:
 data:
   DJANGO_SETTINGS_MODULE: project.settings
   DEBUG: "False"
-  MYSQL_HOST: "10.132.0.10"
+  MYSQL_HOST: "10.132.0.11"
   MYSQL_PORT: "3306"
   MYSQL_DATABASE: "mydb"
   MYSQL_USER: "django"
@@ -27,6 +27,7 @@ data:
   CLOUD_STORAGE_BUCKET: "nutrihub-static-media"
   STATIC_URL: "https://storage.googleapis.com/nutrihub-static-media/static/"
   MEDIA_URL: "https://storage.googleapis.com/nutrihub-static-media/media/"
+  GCS_UPLOAD_BUCKET: "baris-media-dev"
 ---
 apiVersion: v1
 kind: Secret
@@ -40,6 +41,7 @@ stringData:
   FATSECRET_CONSUMER_KEY: ""
   FATSECRET_CONSUMER_SECRET: ""
   DEEPL_API_KEY: ""
+  CRON_STATS_TOKEN: "replace-with-strong-secret"
 ---
 apiVersion: cloud.google.com/v1
 kind: BackendConfig

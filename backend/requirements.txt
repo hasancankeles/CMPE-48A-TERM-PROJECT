@@ -14,3 +14,5 @@ Pillow>=10.0.0
 gunicorn
 whitenoise
 Pillow
+google-cloud-storage>=2.16.0
+google-cloud-pubsub>=2.21.0

@@ -143,3 +143,108 @@ resource "google_compute_firewall" "locust_ui" {
   target_tags   = ["locust"]
   source_ranges = var.locust_allow_cidr
 }
+
+# Optional: Cloud Scheduler job to trigger daily stats collection
+resource "google_cloud_scheduler_job" "daily_stats" {
+  count       = var.enable_daily_stats_job ? 1 : 0
+  name        = "daily-stats"
+  description = "Trigger daily platform statistics collection"
+  schedule    = var.stats_job_schedule
+  time_zone   = var.stats_job_time_zone
+
+  http_target {
+    http_method = "POST"
+    uri         = var.stats_job_target_url
+    headers = {
+      "Content-Type" = "application/json"
+      "X-Cron-Auth"  = var.stats_job_auth_header
+    }
+    body = base64encode("{\"source\":\"cloud-scheduler\"}")
+  }
+}
+
+# Serverless stats worker (Cloud Run) + optional scheduler
+resource "google_vpc_access_connector" "stats_worker" {
+  count        = var.enable_stats_worker ? 1 : 0
+  name         = var.stats_worker_vpc_connector_name
+  region       = var.stats_worker_region != "" ? var.stats_worker_region : var.region
+  network      = var.stats_worker_vpc_network
+  ip_cidr_range = var.stats_worker_vpc_cidr
+}
+
+resource "google_cloud_run_v2_service" "stats_worker" {
+  count    = var.enable_stats_worker ? 1 : 0
+  name     = "stats-worker"
+  location = var.stats_worker_region != "" ? var.stats_worker_region : var.region
+
+  template {
+    service_account = null
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image = var.stats_worker_image
+      env {
+        name  = "CRON_STATS_TOKEN"
+        value = var.stats_worker_auth_header
+      }
+      env {
+        name  = "MYSQL_HOST"
+        value = var.stats_worker_mysql_host
+      }
+      env {
+        name  = "MYSQL_USER"
+        value = var.stats_worker_mysql_user
+      }
+      env {
+        name  = "MYSQL_PASSWORD"
+        value = var.stats_worker_mysql_password
+      }
+      env {
+        name  = "MYSQL_DATABASE"
+        value = var.stats_worker_mysql_database
+      }
+      env {
+        name  = "MYSQL_PORT"
+        value = var.stats_worker_mysql_port
+      }
+    }
+
+    vpc_access {
+      connector = google_vpc_access_connector.stats_worker[0].id
+      egress    = "ALL_TRAFFIC"
+    }
+  }
+
+  ingress     = "INGRESS_TRAFFIC_ALL"
+  launch_stage = "GA"
+}
+
+resource "google_cloud_run_service_iam_member" "stats_worker_invoker" {
+  count    = var.enable_stats_worker ? 1 : 0
+  location = google_cloud_run_v2_service.stats_worker[0].location
+  project  = var.project_id
+  service  = google_cloud_run_v2_service.stats_worker[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloud_scheduler_job" "stats_worker" {
+  count       = var.enable_stats_worker ? 1 : 0
+  name        = "stats-worker"
+  description = "Trigger Cloud Run stats worker"
+  schedule    = var.stats_worker_schedule
+  time_zone   = var.stats_worker_time_zone
+
+  http_target {
+    http_method = "POST"
+    uri         = "${google_cloud_run_v2_service.stats_worker[0].uri}/run"
+    headers = {
+      "Content-Type" = "application/json"
+      "X-Cron-Auth"  = var.stats_worker_auth_header
+    }
+    body = base64encode("{}")
+  }
+}

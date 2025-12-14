@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ForumPostCard from '../components/ForumPostCard'
-import { User, Certificate, ArrowLeft } from '@phosphor-icons/react'
+import { User, Certificate, ArrowLeft, Medal } from '@phosphor-icons/react'
 import { apiClient, ForumPost, UserResponse } from '../lib/apiClient'
 import { notifyLikeChange } from '../lib/likeNotifications'
+import BadgeShowcase from '../components/BadgeShowcase'
 
 interface ProfessionTag {
   id?: number
@@ -17,7 +18,7 @@ const UserProfile = () => {
   const navigate = useNavigate()
 
   const [userProfile, setUserProfile] = useState<UserResponse | null>(null)
-  const [activeTab, setActiveTab] = useState<'posts' | 'tags'>('posts')
+  const [activeTab, setActiveTab] = useState<'posts' | 'tags' | 'badges'>('posts')
   const [userPosts, setUserPosts] = useState<ForumPost[]>([])
   const [professionTags, setProfessionTags] = useState<ProfessionTag[]>([])
   const [likedPostsMap, setLikedPostsMap] = useState<{[key: number]: boolean}>({})
@@ -219,6 +220,21 @@ const UserProfile = () => {
                     <span className="flex-grow text-center">Posts</span>
                   </button>
                   <button
+                    onClick={() => setActiveTab('badges')}
+                    className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow"
+                    style={{
+                      backgroundColor: activeTab === 'badges'
+                        ? 'var(--forum-default-active-bg)'
+                        : 'var(--forum-default-bg)',
+                      color: activeTab === 'badges'
+                        ? 'var(--forum-default-active-text)'
+                        : 'var(--forum-default-text)',
+                    }}
+                  >
+                    <Medal size={18} weight="fill" />
+                    <span className="flex-grow text-center">Badges</span>
+                  </button>
+                  <button
                     onClick={() => setActiveTab('tags')}
                     className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow"
                     style={{
@@ -259,6 +275,13 @@ const UserProfile = () => {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {activeTab === 'badges' && (
+              <div>
+                <h2 className="nh-subtitle mb-4">Badges</h2>
+                <BadgeShowcase userId={userProfile.id} />
               </div>
             )}
 

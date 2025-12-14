@@ -60,6 +60,13 @@ class PostViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+        
+        # Trigger badge calculation for the user (they created a post)
+        try:
+            from accounts.badge_utils import publish_badge_calculation_request
+            publish_badge_calculation_request(self.request.user, event_type="post_created")
+        except Exception as e:
+            logging.warning(f"Failed to trigger badge calculation: {e}")
 
     def _calculate_similarity(self, query: str, target: str) -> int:
         """
@@ -155,6 +162,13 @@ class PostViewSet(viewsets.ModelViewSet):
             like.delete()
             return Response({"liked": False, "like_count": post.likes.count()}, status=status.HTTP_200_OK)
 
+        # Trigger badge calculation for the post author (they received a like)
+        try:
+            from accounts.badge_utils import publish_badge_calculation_request
+            publish_badge_calculation_request(post.author, event_type="post_liked")
+        except Exception as e:
+            logging.warning(f"Failed to trigger badge calculation: {e}")
+
         return Response({"liked": True, "like_count": post.likes.count()}, status=status.HTTP_201_CREATED)
 
 
@@ -214,3 +228,10 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 "You can only add recipes to your own posts."
             )
         serializer.save()
+        
+        # Trigger badge calculation for the user (they created a recipe)
+        try:
+            from accounts.badge_utils import publish_badge_calculation_request
+            publish_badge_calculation_request(self.request.user, event_type="recipe_created")
+        except Exception as e:
+            logging.warning(f"Failed to trigger badge calculation: {e}")

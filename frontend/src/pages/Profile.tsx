@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import ForumPostCard from '../components/ForumPostCard'
 import { subscribeLikeChanges, notifyLikeChange } from '../lib/likeNotifications'
-import { User, Heart, BookOpen, Certificate, Warning, Plus, X, BookmarkSimple, Hamburger, ChartLineUp } from '@phosphor-icons/react'
+import { User, Heart, BookOpen, Certificate, Warning, Plus, X, BookmarkSimple, Hamburger, ChartLineUp, Medal } from '@phosphor-icons/react'
 import { apiClient, ForumPost, MealPlan} from '../lib/apiClient'
 import NutritionSummary from '../components/NutritionSummary'
 import NutritionTracking from '../components/NutritionTracking'
+import BadgeShowcase from '../components/BadgeShowcase'
 
 // Predefined allergen list
 const PREDEFINED_ALLERGENS = [
@@ -58,7 +59,7 @@ const REPORT_OPTIONS: ReportOption[] = [
 const Profile = () => {
   const { user, fetchUserProfile } = useAuth()  
   // State management
-  const [activeTab, setActiveTab] = useState<'overview' | 'allergens' | 'posts' | 'recipes' | 'tags' | 'report' | 'mealPlans' | 'nutrition'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'badges' | 'allergens' | 'posts' | 'recipes' | 'tags' | 'report' | 'mealPlans' | 'nutrition'>('overview')
   const [selectedAllergens, setSelectedAllergens] = useState<AllergenData[]>([])
   const [customAllergen, setCustomAllergen] = useState('')
   const [likedPosts, setLikedPosts] = useState<ForumPost[]>([])
@@ -650,6 +651,22 @@ const Profile = () => {
                 </button>
                 
                 <button
+                  onClick={() => setActiveTab('badges')}
+                  className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow"
+                  style={{
+                    backgroundColor: activeTab === 'badges'
+                      ? 'var(--forum-default-active-bg)'
+                      : 'var(--forum-default-bg)',
+                    color: activeTab === 'badges'
+                      ? 'var(--forum-default-active-text)'
+                      : 'var(--forum-default-text)',
+                  }}
+                >
+                  <Medal size={18} weight="fill" />
+                  <span className="flex-grow text-center">Badges</span>
+                </button>
+                
+                <button
                   onClick={() => setActiveTab('allergens')}
                   className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow"
                   style={{
@@ -856,6 +873,13 @@ const Profile = () => {
 
                 {/* Nutrition Summary */}
                 <NutritionSummary compact={true} />
+              </div>
+            )}
+
+            {activeTab === 'badges' && (
+              <div className="space-y-6">
+                <h2 className="nh-subtitle">Your Badges</h2>
+                <BadgeShowcase userId={user?.id} isOwnProfile />
               </div>
             )}
 
