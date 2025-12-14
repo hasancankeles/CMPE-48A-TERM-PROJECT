@@ -123,3 +123,89 @@ variable "stats_job_time_zone" {
   type        = string
   default     = "Etc/UTC"
 }
+
+variable "enable_stats_worker" {
+  description = "Whether to create the Cloud Run stats worker and scheduler"
+  type        = bool
+  default     = false
+}
+
+variable "stats_worker_image" {
+  description = "Container image for the stats worker Cloud Run service"
+  type        = string
+  default     = ""
+}
+
+variable "stats_worker_region" {
+  description = "Region for the stats worker Cloud Run service (defaults to var.region)"
+  type        = string
+  default     = ""
+}
+
+variable "stats_worker_auth_header" {
+  description = "Shared secret sent as X-Cron-Auth to the stats worker"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stats_worker_schedule" {
+  description = "Cron schedule for the Cloud Run stats worker"
+  type        = string
+  default     = "0 0 * * *"
+}
+
+variable "stats_worker_time_zone" {
+  description = "Time zone for the Cloud Run stats worker schedule"
+  type        = string
+  default     = "Etc/UTC"
+}
+
+variable "stats_worker_mysql_host" {
+  description = "MySQL host reachable from Cloud Run (likely the VM private IP via VPC connector)"
+  type        = string
+  default     = ""
+}
+
+variable "stats_worker_mysql_user" {
+  description = "MySQL user for stats worker"
+  type        = string
+  default     = "django"
+}
+
+variable "stats_worker_mysql_password" {
+  description = "MySQL password for stats worker"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stats_worker_mysql_database" {
+  description = "MySQL database for stats worker"
+  type        = string
+  default     = "mydb"
+}
+
+variable "stats_worker_mysql_port" {
+  description = "MySQL port for stats worker"
+  type        = string
+  default     = "3306"
+}
+
+variable "stats_worker_vpc_connector_name" {
+  description = "Name of the VPC connector for the stats worker"
+  type        = string
+  default     = "stats-worker-connector"
+}
+
+variable "stats_worker_vpc_network" {
+  description = "VPC network for the stats worker connector"
+  type        = string
+  default     = "default"
+}
+
+variable "stats_worker_vpc_cidr" {
+  description = "CIDR range for the stats worker VPC connector"
+  type        = string
+  default     = "10.8.0.0/28"
+}
