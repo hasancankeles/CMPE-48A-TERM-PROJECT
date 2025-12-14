@@ -33,6 +33,7 @@ from .models import User, Allergen, Tag, UserTag, Follow
 from forum.models import Like, Post, Recipe
 from forum.serializers import PostSerializer, RecipeSerializer
 import os
+from google.auth import iam
 from google.cloud import storage
 import logging
 from google.auth import default as google_auth_default
@@ -752,6 +753,13 @@ class ServeProfileImageView(APIView):
 
                 # Use default credentials (Workload Identity) and IAM-based signing.
                 credentials, _ = google_auth_default()
+                service_account_email = getattr(
+                    credentials, "service_account_email", None
+                )
+                signing_credentials = iam.Credentials.from_service_account_email(
+                    service_account_email, credentials
+                )
+
                 storage_client = storage.Client(credentials=credentials)
                 blob = storage_client.bucket(bucket_name).blob(object_name)
 
@@ -760,10 +768,8 @@ class ServeProfileImageView(APIView):
                     version="v4",
                     expiration=expiration,
                     method="GET",
-                    credentials=credentials,
-                    service_account_email=getattr(
-                        credentials, "service_account_email", None
-                    ),
+                    credentials=signing_credentials,
+                    service_account_email=service_account_email,
                 )
                 return HttpResponseRedirect(signed)
             except Exception as e:
@@ -805,6 +811,13 @@ class ServeCertificateView(APIView):
                 bucket_name, object_name = path_part.split("/", 1)
 
                 credentials, _ = google_auth_default()
+                service_account_email = getattr(
+                    credentials, "service_account_email", None
+                )
+                signing_credentials = iam.Credentials.from_service_account_email(
+                    service_account_email, credentials
+                )
+
                 storage_client = storage.Client(credentials=credentials)
                 blob = storage_client.bucket(bucket_name).blob(object_name)
 
@@ -813,10 +826,8 @@ class ServeCertificateView(APIView):
                     version="v4",
                     expiration=expiration,
                     method="GET",
-                    credentials=credentials,
-                    service_account_email=getattr(
-                        credentials, "service_account_email", None
-                    ),
+                    credentials=signing_credentials,
+                    service_account_email=service_account_email,
                 )
                 return HttpResponseRedirect(signed)
             except Exception as e:
