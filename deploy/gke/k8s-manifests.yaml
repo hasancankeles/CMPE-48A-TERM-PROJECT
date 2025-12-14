@@ -19,7 +19,7 @@ metadata:
 data:
   DJANGO_SETTINGS_MODULE: project.settings
   DEBUG: "False"
-  MYSQL_HOST: "10.132.0.10"
+  MYSQL_HOST: "10.132.0.11"
   MYSQL_PORT: "3306"
   MYSQL_DATABASE: "mydb"
   MYSQL_USER: "django"
