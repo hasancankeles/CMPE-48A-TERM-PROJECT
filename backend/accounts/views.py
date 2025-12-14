@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny, BasePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.pagination import PageNumberPagination
 from django.http import FileResponse, Http404, HttpResponseRedirect
@@ -36,6 +37,38 @@ from google.cloud import storage
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    Custom login view that extends TokenObtainPairView.
+    After successful login, publishes a notification to Pub/Sub
+    for sending login email to the user.
+    """
+    
+    def post(self, request, *args, **kwargs):
+        # Call the parent's post method to handle authentication
+        response = super().post(request, *args, **kwargs)
+        
+        # If login was successful (status 200), send login notification
+        if response.status_code == 200:
+            try:
+                # Get the user from the request data
+                username = request.data.get('username')
+                if username:
+                    user = User.objects.get(username=username)
+                    
+                    # Publish login notification to Pub/Sub
+                    from .email_utils import publish_login_notification
+                    publish_login_notification(user, request)
+                    
+            except User.DoesNotExist:
+                logger.warning(f"User {username} not found for login notification")
+            except Exception as e:
+                # Don't fail the login if notification fails
+                logger.error(f"Failed to send login notification: {e}")
+        
+        return response
 
 
 class UserListView(APIView):
