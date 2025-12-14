@@ -34,6 +34,7 @@ from forum.models import Like, Post, Recipe
 from forum.serializers import PostSerializer, RecipeSerializer
 import os
 from google.auth import iam
+from google.auth.transport.requests import Request
 from google.cloud import storage
 import logging
 from google.auth import default as google_auth_default
@@ -756,9 +757,7 @@ class ServeProfileImageView(APIView):
                 service_account_email = getattr(
                     credentials, "service_account_email", None
                 )
-                signing_credentials = iam.Credentials.from_service_account_email(
-                    service_account_email, credentials
-                )
+                signer = iam.Signer(Request(), credentials, service_account_email)
 
                 storage_client = storage.Client(credentials=credentials)
                 blob = storage_client.bucket(bucket_name).blob(object_name)
@@ -768,7 +767,7 @@ class ServeProfileImageView(APIView):
                     version="v4",
                     expiration=expiration,
                     method="GET",
-                    credentials=signing_credentials,
+                    credentials=signer,
                     service_account_email=service_account_email,
                 )
                 return HttpResponseRedirect(signed)
@@ -814,9 +813,7 @@ class ServeCertificateView(APIView):
                 service_account_email = getattr(
                     credentials, "service_account_email", None
                 )
-                signing_credentials = iam.Credentials.from_service_account_email(
-                    service_account_email, credentials
-                )
+                signer = iam.Signer(Request(), credentials, service_account_email)
 
                 storage_client = storage.Client(credentials=credentials)
                 blob = storage_client.bucket(bucket_name).blob(object_name)
@@ -826,7 +823,7 @@ class ServeCertificateView(APIView):
                     version="v4",
                     expiration=expiration,
                     method="GET",
-                    credentials=signing_credentials,
+                    credentials=signer,
                     service_account_email=service_account_email,
                 )
                 return HttpResponseRedirect(signed)
