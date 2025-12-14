@@ -83,31 +83,40 @@ def _publish_image_cache_request(image_url: str, url_hash: str) -> bool:
         return False
 
 
-def _get_gcs_cached_image_url(url_hash: str) -> str | None:
+def _get_cached_image_url(url_hash: str) -> str | None:
     """
-    Check if an image exists in GCS cache and return its public URL.
-    Returns None if not found or GCS is not configured.
+    Check if an image is cached (in database) and return the GCS URL.
+    This is efficient - just a database lookup, no GCS API calls.
+    Returns None if not found.
     """
-    bucket_name = getattr(django_settings, "GCS_IMAGE_CACHE_BUCKET", "")
-    if not bucket_name:
-        return None
-    
     try:
-        from google.cloud import storage
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        
-        # Check common extensions
-        for ext in [".jpg", ".png", ".webp", ".gif"]:
-            blob_name = f"image-cache/{url_hash}{ext}"
-            blob = bucket.blob(blob_name)
-            if blob.exists():
-                # Return the public URL
-                return f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
+        cache_entry = ImageCache.objects.filter(url_hash=url_hash).first()
+        if cache_entry and cache_entry.gcs_url:
+            # Update access statistics
+            cache_entry.access_count += 1
+            cache_entry.save(update_fields=["access_count", "last_accessed"])
+            return cache_entry.gcs_url
         return None
     except Exception as e:
-        print(f"Error checking GCS cache: {e}")
+        print(f"Error checking image cache: {e}")
         return None
+
+
+def _create_pending_cache_entry(image_url: str, url_hash: str) -> None:
+    """
+    Create a pending ImageCache entry when requesting caching via Pub/Sub.
+    The Cloud Function will update this with the GCS URL after caching.
+    """
+    try:
+        ImageCache.objects.get_or_create(
+            url_hash=url_hash,
+            defaults={
+                "original_url": image_url,
+                "gcs_url": None,  # Will be set by Cloud Function callback
+            }
+        )
+    except Exception as e:
+        print(f"Error creating pending cache entry: {e}")
 
 
 class FoodCatalog(ListAPIView):
@@ -437,11 +446,12 @@ def image_proxy(request):
     Proxies external food images with caching via Google Cloud Storage.
     
     Flow:
-    1. Check if image is cached in GCS (via Cloud Function)
+    1. Check database for cached GCS URL (fast lookup)
     2. If cached: redirect to GCS URL
-    3. If not cached: publish to Pub/Sub for async caching, redirect to original URL
+    3. If not cached: create pending entry, publish to Pub/Sub, redirect to original URL
     
-    The Cloud Function (triggered by Pub/Sub) handles the actual download and upload to GCS.
+    The Cloud Function (triggered by Pub/Sub) handles the actual download and upload to GCS,
+    then calls back to update the database with the GCS URL.
     """
     image_url = request.query_params.get("url")
 
@@ -465,13 +475,13 @@ def image_proxy(request):
     url_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
 
     try:
-        # First, check if image exists in GCS cache
-        gcs_url = _get_gcs_cached_image_url(url_hash)
+        # Check database for cached GCS URL (efficient - no GCS API call)
+        gcs_url = _get_cached_image_url(url_hash)
         if gcs_url:
             # Redirect to GCS-hosted image
             return HttpResponseRedirect(gcs_url)
 
-        # Fallback: Check local ImageCache (for backwards compatibility)
+        # Fallback: Check local ImageCache file (for backwards compatibility)
         cache_entry = ImageCache.objects.filter(url_hash=url_hash).first()
         if cache_entry and cache_entry.cached_file:
             # Update access statistics
@@ -486,7 +496,8 @@ def image_proxy(request):
             response["Cache-Control"] = "public, max-age=86400"  # Cache for 24 hours
             return response
 
-        # Image not cached anywhere - publish to Pub/Sub for async caching
+        # Image not cached - create pending entry and publish to Pub/Sub
+        _create_pending_cache_entry(image_url, url_hash)
         _publish_image_cache_request(image_url, url_hash)
 
         # Redirect to original URL for immediate response
@@ -497,3 +508,46 @@ def image_proxy(request):
         print(f"Error in image proxy for {image_url}: {str(e)}")
         traceback.print_exc()
         return HttpResponseRedirect(image_url)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])  # Cloud Function needs to call this without auth
+def image_cache_callback(request):
+    """
+    POST /api/foods/image-cache-callback/
+    Called by the Cloud Function after successfully caching an image to GCS.
+    Updates the ImageCache entry with the GCS URL.
+    
+    Expected payload: {"hash": "<url_hash>", "gcs_url": "<public_gcs_url>"}
+    """
+    url_hash = request.data.get("hash")
+    gcs_url = request.data.get("gcs_url")
+    
+    if not url_hash or not gcs_url:
+        return Response(
+            {"error": "hash and gcs_url are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        cache_entry = ImageCache.objects.filter(url_hash=url_hash).first()
+        if cache_entry:
+            cache_entry.gcs_url = gcs_url
+            cache_entry.save(update_fields=["gcs_url"])
+            print(f"Updated cache entry with GCS URL: {gcs_url[:60]}...")
+            return Response({"status": "updated"}, status=status.HTTP_200_OK)
+        else:
+            # Entry doesn't exist, create it
+            ImageCache.objects.create(
+                url_hash=url_hash,
+                original_url="",  # Unknown at this point
+                gcs_url=gcs_url,
+            )
+            print(f"Created cache entry with GCS URL: {gcs_url[:60]}...")
+            return Response({"status": "created"}, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        print(f"Error in image cache callback: {e}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

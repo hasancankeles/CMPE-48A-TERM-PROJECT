@@ -82,6 +82,18 @@ class User(AbstractUser):
         related_name="current_for_users",
     )
 
+    # Pre-calculated badges (updated by Cloud Function)
+    badges = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Pre-calculated user badges (updated by Cloud Function)"
+    )
+    badges_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time badges were recalculated"
+    )
+
     groups = models.ManyToManyField(
         Group,
         related_name="custom_user_set",

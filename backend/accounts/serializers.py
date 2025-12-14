@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from .models import User, Recipe, Tag, Allergen, UserTag, Report
-from .services import get_user_badges
 
 """
 Serializers are used for converting complex data types, like querysets and model instances, into native Python datatypes.
@@ -143,7 +142,18 @@ class UserSerializer(serializers.ModelSerializer):
         return None
 
     def get_badges(self, obj):
-        return get_user_badges(obj)
+        """
+        Return user badges. Uses pre-calculated badges if available,
+        otherwise calculates them synchronously.
+        """
+        # If badges are pre-calculated (by Cloud Function), return them
+        if obj.badges:
+            return obj.badges
+        
+        # Fallback: calculate synchronously
+        from .badge_utils import calculate_badges_sync
+        badges, _ = calculate_badges_sync(obj)
+        return badges
 
     def get_tags(self, user_obj):
         """Serialize tags with user context for per-user verification"""

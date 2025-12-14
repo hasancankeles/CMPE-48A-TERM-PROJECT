@@ -29,6 +29,10 @@ from .views import (
     UserMetricsView,
     NutritionTargetsView,
     ResetNutritionTargetsView,
+    # Badge endpoints
+    badges_callback,
+    UserBadgesView,
+    recalculate_badges,
 )
 
 
@@ -97,5 +101,10 @@ urlpatterns = [
         name="reset-nutrition-targets",
     ),
     path("moderation/", include(moderation_router.urls), name="moderation"),
+    # Badge endpoints
+    path("badges/", UserBadgesView.as_view(), name="user-badges"),
+    path("badges/<int:user_id>/", UserBadgesView.as_view(), name="user-badges-by-id"),
+    path("badges/recalculate/", recalculate_badges, name="recalculate-badges"),
+    path("badges-callback/", badges_callback, name="badges-callback"),
 ]
 

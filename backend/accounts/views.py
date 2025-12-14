@@ -1,4 +1,4 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.request import Request
 from rest_framework import status
@@ -1047,3 +1047,130 @@ class ResetNutritionTargetsView(APIView):
         serializer = NutritionTargetsSerializer(targets)
         
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ==================== BADGES ====================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])  # Cloud Function needs to call this without auth
+def badges_callback(request):
+    """
+    POST /api/users/badges-callback/
+    Called by the Cloud Function after calculating badges.
+    Updates the user's badges in the database.
+    
+    Expected payload: {
+        "user_id": <int>,
+        "badges": [<badge objects>],
+        "stats": {"recipe_count": int, "total_likes": int, "post_count": int}
+    }
+    """
+    from .badge_utils import update_user_badges
+    
+    user_id = request.data.get("user_id")
+    badges = request.data.get("badges", [])
+    stats = request.data.get("stats", {})
+    
+    if not user_id:
+        return Response(
+            {"error": "user_id is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        user = User.objects.get(id=user_id)
+        update_user_badges(user, badges, stats)
+        
+        return Response({
+            "message": "Badges updated successfully",
+            "user_id": user_id,
+            "badge_count": len(badges)
+        }, status=status.HTTP_200_OK)
+        
+    except User.DoesNotExist:
+        return Response(
+            {"error": f"User {user_id} not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error updating badges for user {user_id}: {e}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+class UserBadgesView(APIView):
+    """
+    GET /api/users/badges/
+    Get the authenticated user's badges.
+    
+    GET /api/users/badges/<user_id>/
+    Get a specific user's badges.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, user_id=None):
+        from .badge_utils import calculate_badges_sync, get_user_badge_stats, publish_badge_calculation_request
+        
+        # Determine which user to get badges for
+        if user_id:
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "User not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            user = request.user
+        
+        # Get current stats
+        stats = get_user_badge_stats(user)
+        
+        # If badges are not cached or outdated, calculate them
+        if not user.badges or user.badges_updated_at is None:
+            # Calculate synchronously for immediate response
+            badges, _ = calculate_badges_sync(user)
+            
+            # Also trigger async calculation via Cloud Function (if configured)
+            publish_badge_calculation_request(user, event_type="profile_view")
+        else:
+            badges = user.badges
+        
+        return Response({
+            "user_id": user.id,
+            "username": user.username,
+            "badges": badges,
+            "stats": stats,
+            "badges_updated_at": user.badges_updated_at,
+        }, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def recalculate_badges(request):
+    """
+    POST /api/users/badges/recalculate/
+    Force recalculation of the authenticated user's badges.
+    Triggers the Cloud Function to recalculate.
+    """
+    from .badge_utils import calculate_badges_sync, update_user_badges, publish_badge_calculation_request
+    
+    user = request.user
+    
+    # Calculate badges synchronously for immediate response
+    badges, stats = calculate_badges_sync(user)
+    
+    # Update in database
+    update_user_badges(user, badges, stats)
+    
+    # Also trigger Cloud Function for future consistency
+    published = publish_badge_calculation_request(user, event_type="manual_recalculate")
+    
+    return Response({
+        "message": "Badges recalculated",
+        "badges": badges,
+        "stats": stats,
+        "cloud_function_triggered": published,
+    }, status=status.HTTP_200_OK)

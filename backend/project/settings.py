@@ -221,3 +221,4 @@ GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 GCS_MEDIA_BUCKET = os.environ.get("GCS_MEDIA_BUCKET", "")  # For profile/certificate pictures
 GCS_IMAGE_CACHE_BUCKET = os.environ.get("GCS_IMAGE_CACHE_BUCKET", "")  # For food image caching
 PUBSUB_IMAGE_CACHE_TOPIC = os.environ.get("PUBSUB_IMAGE_CACHE_TOPIC", "image-cache-requests")
+PUBSUB_BADGE_CALC_TOPIC = os.environ.get("PUBSUB_BADGE_CALC_TOPIC", "badge-calculation-requests")

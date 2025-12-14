@@ -60,13 +60,14 @@ class FoodProposal(models.Model):
 class ImageCache(models.Model):
     """
     Cache model for storing proxied food images from external sources.
-    Improves performance by caching externally-hosted images locally.
+    Supports both local file caching and GCS (Google Cloud Storage) caching.
     Uses url_hash for uniqueness to avoid MySQL index length limitations.
     """
 
     url_hash = models.CharField(max_length=64, unique=True, db_index=True)
     original_url = models.TextField()
-    cached_file = models.ImageField(upload_to="cached_images/")
+    cached_file = models.ImageField(upload_to="cached_images/", blank=True, null=True)
+    gcs_url = models.URLField(blank=True, null=True, help_text="GCS public URL after Cloud Function caches the image")
     content_type = models.CharField(max_length=100, default="image/jpeg")
     file_size = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
