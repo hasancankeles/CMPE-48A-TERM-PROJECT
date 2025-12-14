@@ -45,3 +45,4 @@ Notes:
 - Firewall `allow-mysql-from-gke` allows the pod CIDR from the created cluster to reach MySQL on 3306.
 - MySQL VM has an ephemeral external IP; remove `access_config {}` if you want private-only and use Cloud NAT or bastion.
 - Adjust node count/machine types in `variables.tf` to match cost/perf targets.
+- Optional daily stats scheduler: set `enable_daily_stats_job=true`, `stats_job_target_url` to the backend endpoint (e.g. `https://<domain>/api/stats/run/`), and `stats_job_auth_header` to the same value you set as `CRON_STATS_TOKEN` in `backend-secrets`.

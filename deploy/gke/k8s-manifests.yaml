@@ -40,6 +40,7 @@ stringData:
   FATSECRET_CONSUMER_KEY: ""
   FATSECRET_CONSUMER_SECRET: ""
   DEEPL_API_KEY: ""
+  CRON_STATS_TOKEN: "replace-with-strong-secret"
 ---
 apiVersion: cloud.google.com/v1
 kind: BackendConfig

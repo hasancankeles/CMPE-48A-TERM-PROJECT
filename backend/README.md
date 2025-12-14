@@ -104,6 +104,11 @@ This project uses OpenAI's image generation API to create food images. The image
 python ./backend/manage.py test api  # runs tests and prints results/errors to terminal
 ```
 
+## Daily stats cron hook
+- Stats endpoint: `POST /api/stats/run/` (expects header `X-Cron-Auth=<CRON_STATS_TOKEN>`)
+- Set environment variable `CRON_STATS_TOKEN` (also populated from the Kubernetes secret `backend-secrets` in `deploy/gke/k8s-manifests.yaml`)
+- A GET endpoint `GET /api/stats/latest/` is available for admin users to inspect the latest snapshot.
+
 ## Contribution Guide
 
 Please format your changes with `black`:

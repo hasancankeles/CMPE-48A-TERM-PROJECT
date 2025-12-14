@@ -92,3 +92,34 @@ variable "static_ip_name" {
   type        = string
   default     = "nutrihub-ip"
 }
+
+variable "enable_daily_stats_job" {
+  description = "Whether to create the daily stats Cloud Scheduler job"
+  type        = bool
+  default     = false
+}
+
+variable "stats_job_target_url" {
+  description = "HTTPS endpoint that triggers daily stats computation"
+  type        = string
+  default     = ""
+}
+
+variable "stats_job_auth_header" {
+  description = "Shared secret value sent as X-Cron-Auth to the stats endpoint"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stats_job_schedule" {
+  description = "Cron schedule for the stats job"
+  type        = string
+  default     = "0 0 * * *"
+}
+
+variable "stats_job_time_zone" {
+  description = "Time zone for the stats scheduler"
+  type        = string
+  default     = "Etc/UTC"
+}

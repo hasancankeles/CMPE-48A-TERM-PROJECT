@@ -143,3 +143,22 @@ resource "google_compute_firewall" "locust_ui" {
   target_tags   = ["locust"]
   source_ranges = var.locust_allow_cidr
 }
+
+# Optional: Cloud Scheduler job to trigger daily stats collection
+resource "google_cloud_scheduler_job" "daily_stats" {
+  count       = var.enable_daily_stats_job ? 1 : 0
+  name        = "daily-stats"
+  description = "Trigger daily platform statistics collection"
+  schedule    = var.stats_job_schedule
+  time_zone   = var.stats_job_time_zone
+
+  http_target {
+    http_method = "POST"
+    uri         = var.stats_job_target_url
+    headers = {
+      "Content-Type" = "application/json"
+      "X-Cron-Auth"  = var.stats_job_auth_header
+    }
+    body = base64encode("{\"source\":\"cloud-scheduler\"}")
+  }
+}

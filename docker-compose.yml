@@ -31,6 +31,7 @@ services:
     environment:
       <<: *db-env
       DJANGO_SECRET_KEY: "super-secret-key"
+      CRON_STATS_TOKEN: "${CRON_STATS_TOKEN:-choose-a-strong-token}"
     volumes:
       - static_volume:/project/staticfiles
       - media_volume:/project/media
