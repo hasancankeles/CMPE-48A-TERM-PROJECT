@@ -13,7 +13,7 @@
   - `/api/foods/` median ~6.8 s, p95 ~18 s, p99 ~22 s.
   - `/api/healthz/` and `/api/time?name=locust` similar to `/api/foods/` (median ~6.5–6.6 s, p95 ~18 s, p99 ~22 s).
   - Aggregated median ~1.1 s, p95 ~17 s, p99 ~21 s.
-- Errors: 0 failures recorded by Locust (though LB showed 5xx spikes—see below).
+- Errors: 2352 of 73844 of requests failed in total.
 
 **Infra/resource observations (Cloud Monitoring)**
 - Backend HPA: scaled to max=6 and stayed pinned there for the run (ScalingLimited=True).
@@ -26,6 +26,6 @@
 - The app tier is the bottleneck. Each backend pod is capped at 500m CPU, and HPA maxed out at 6 replicas, so total backend compute is constrained. Nodes still had free CPU, and DB was healthy, while request latency and LB 5xx increased under load. Classic signal of pod CPU saturation/throttling and insufficient replica ceiling.
 
 **Next steps (to validate improvement)**
-- Increase backend pod resources (e.g., limits 1 vCPU / 1.5 GiB; requests 750m / 1 GiB).
-- Raise HPA ceiling (e.g., max 10) and keep target CPU ~60%.
-- Re-run the same 5-minute 800-user, 50/s test and compare p95/p99, LB 5xx, and pod CPU headroom.
+- Increase backend pod resources (limits 1 vCPU / 1.5 GiB; requests 750m / 1 GiB).
+- Raise HPA ceiling (max 10) and keep target CPU ~60%.
+- We will re-run the same 5-minute 800-user, 50/s test and compare p95/p99, Locust failures, and pod CPU headroom.
