@@ -1,12 +1,22 @@
 from locust import HttpUser, task, between
 
-class SiteUser(HttpUser):
-    wait_time = between(1, 5)
-    host = "http://34.54.126.66"
+
+class WebsiteUser(HttpUser):
+    # Keep a modest think time to mimic real users
+    wait_time = between(1, 2)
 
     @task(3)
-    def view_frontend(self):
+    def home(self):
         self.client.get("/")
+
+    @task(3)
+    def foods_catalog(self):
+        self.client.get("/api/foods/")
+
+    @task(1)
+    def api_time(self):
+        # Add required name param to avoid 400s
+        self.client.get("/api/time", params={"name": "locust"})
 
     @task(1)
     def health(self):

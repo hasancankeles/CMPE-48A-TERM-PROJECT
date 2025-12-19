@@ -1,0 +1,381 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\geometry{margin=1in}
+
+\begin{document}
+\begin{center}
+{\Large\bfseries CMPE48A -- Cloud Computing\par}
+\vspace{0.25em}
+{\Large\bfseries FINAL REPORT\par}
+\vspace{1em}
+{\bfseries Students:}\par
+Hasancan Kele\c{s} and Bar\i\c{s} \"Oks\"uz
+\end{center}
+\thispagestyle{empty}
+\clearpage
+\sloppy
+\setlength{\emergencystretch}{2em}
+
+\section*{Architecture Diagram}
+\begin{figure}[h]
+  \centering
+  \IfFileExists{\detokenize{Cloud arcthitecture diagram.jpeg}}{%
+    \includegraphics[width=0.95\linewidth]{\detokenize{Cloud arcthitecture diagram.jpeg}}%
+  }{%
+    \fbox{\parbox{0.9\linewidth}{\centering Place your architecture diagram here (Cloud arcthitecture diagram.jpeg).}}%
+  }
+  \caption{Cloud architecture: Load Balancer $\to$ GKE (frontend/backend) $\to$ MySQL VM, with buckets, Cloud Functions, Artifact Registry, and Locust VM.}
+\end{figure}
+
+\section{System Architecture}
+
+\subsection*{Important Disclaimer (Experimental Node Pool)}
+\noindent\textbf{Important:} During performance evaluation, we temporarily enabled a larger GKE node pool (\texttt{bigger-pool}) to explore bottlenecks and scaling behavior. This was \textbf{not} part of the original proposal architecture, and it should be treated as an experimental configuration used only for load testing iterations. The original small pool (\texttt{nutrihub-pool}, 3\,$\times$\,\texttt{e2-medium}) still exists but may be scaled down while experiments are running. To return to the proposal-aligned infrastructure (and the Terraform default configuration), the cluster should be reverted by \textbf{shrinking/disabling the experimental pool} and \textbf{restoring the original pool} to 3 nodes.
+
+\subsection{Components}
+\begin{itemize}
+  \item \textbf{Cloud Load Balancer (HTTP/S)}: Public entrypoint at \texttt{136.110.255.27}, terminates HTTP/S and forwards to GKE Ingress.
+  \item \textbf{GKE Standard Cluster (3\,x e2-medium)}: Two deployments in namespace \texttt{nutrihub}:
+    \begin{itemize}
+      \item \textit{Frontend} (Nginx) serving the React SPA.
+      \item \textit{Backend} (Django + Gunicorn) exposing the API.
+    \end{itemize}
+    Workload Identity: KSA \texttt{backend-sa} bound to GSA \texttt{nutrihub-backend}.
+  \item \textbf{MySQL VM (e2-micro)}: Compute Engine instance with private IP for app data.
+  \item \textbf{Cloud Storage Buckets}: \textit{nutrihub-static-media} for static/media; \textit{baris-media-dev} and function/source buckets (e.g., \textit{term-project-480817-image-cache}) for uploads/cache artifacts.
+  \item \textbf{Cloud Functions} (three services in \texttt{gcp-functions/}):
+    \begin{itemize}
+      \item \textit{login\_email\_sender}: Sends login/verification emails; HTTP or Pub/Sub trigger; can read assets from buckets.
+      \item \textit{image\_cache\_subscriber} (image-cache-function): Subscribes to cache events (Pub/Sub), reads/writes cached objects (e.g., image cache bucket).
+      \item \textit{badge\_calculator}: Processes badge logic asynchronously (Pub/Sub), can call backend APIs or persist results.
+    \end{itemize}
+  \item \textbf{Locust VM (e2-standard-2)}: Load generator with Locust UI on port 8089; targets the load balancer IP.
+  \item \textbf{Artifact Registry}: Hosts backend/frontend images in \texttt{europe-west1-docker.pkg.dev/\$PROJECT/nutrihub/}.
+  \item \textbf{Infrastructure as Code}: Terraform configs (\texttt{infra/terraform/}) provision GKE, node pool, MySQL VM, buckets, static IP, Artifact Registry; Kubernetes manifests (\texttt{deploy/gke/k8s-manifests.yaml}) deploy frontend/backend, services, ingress, config/secrets.
+  \item \textbf{Application Source}: Full codebase present (backend Django app, frontend React app, mobile React Native app), plus Locust script (\texttt{locustfile.py}) and Cloud Functions.
+\end{itemize}
+
+\subsection{Interactions and Data Flow}
+\begin{enumerate}
+  \item \textbf{User Traffic}: Load Balancer $\to$ Ingress routes:
+    \begin{itemize}
+      \item \texttt{/} $\to$ frontend Service $\to$ frontend Pod (Nginx serves SPA).
+      \item \texttt{/api/} $\to$ backend Service $\to$ backend Pod (Django/Gunicorn).
+    \end{itemize}
+  \item \textbf{Backend to Database}: Backend pods reach MySQL VM via private IP on port 3306.
+  \item \textbf{Static/Media}: Backend reads/writes \texttt{nutrihub-static-media}; frontend references assets via HTTPS URLs.
+  \item \textbf{Load Generation}: Locust VM sends HTTP(s) to the LB IP, exercising frontend and backend endpoints.
+  \item \textbf{Cloud Functions}: Pub/Sub or HTTP triggers for async tasks (email, cache warming, badge calc); may call backend APIs or read/write buckets.
+  \item \textbf{Observability}: GKE, load balancer, and MySQL VM metrics (CPU, memory, latency, error rates) in Cloud Monitoring.
+\end{enumerate}
+
+\subsection{Operational Notes}
+\begin{itemize}
+  \item Node pool fixed at 3 nodes (e2-medium); backend/frontend sized to fit this capacity.
+  \item Images pulled from \texttt{europe-west1-docker.pkg.dev/\$PROJECT/nutrihub/}.
+  \item Ingress uses the reserved global static IP \texttt{nutrihub-ip}.
+  \item Terraform defaults reflect the small pool; manifests and function code are in-repo for reproducible deployment.
+\end{itemize}
+
+\section{Deployment Process (Step by Step)}
+\begin{enumerate}
+  \item \textbf{Provision infra (Terraform)}  
+    \begin{itemize}
+      \item \texttt{cd infra/terraform}  
+      \item \texttt{terraform init}  
+      \item \texttt{terraform apply -var "project\_id=YOUR\_PROJECT\_ID"}  
+      \item Defaults: 3\,$\times$\,e2-medium GKE nodes, e2-micro MySQL VM, static IP, buckets, Artifact Registry.
+    \end{itemize}
+  \item \textbf{Get cluster credentials}  
+    \begin{itemize}
+      \item \texttt{gcloud container clusters get-credentials nutrihub} \\
+            \texttt{ \ \ --zone europe-west1-b --project YOUR\_PROJECT\_ID}
+    \end{itemize}
+  \item \textbf{Apply Kubernetes manifests}  
+    \begin{itemize}
+      \item Edit \texttt{deploy/gke/k8s-manifests.yaml}: set \texttt{MYSQL\_HOST}, bucket names, secrets.
+      \item \texttt{kubectl apply -f deploy/gke/k8s-manifests.yaml}
+    \end{itemize}
+  \item \textbf{Build \& push images to Artifact Registry}  
+    \begin{itemize}
+      \item \texttt{REGION=europe-west1; PROJ=YOUR\_PROJECT\_ID}
+      \item \texttt{docker build -t \$REGION-docker.pkg.dev/\$PROJ/nutrihub/backend:latest backend}
+      \item \texttt{docker push \$REGION-docker.pkg.dev/\$PROJ/nutrihub/backend:latest}
+      \item \texttt{docker build -t \$REGION-docker.pkg.dev/\$PROJ/nutrihub/frontend:latest frontend \textbackslash{} }
+      \item \texttt{\ \ --build-arg VITE\_API\_BASE\_URL=http://136.110.255.27/api}
+      \item \texttt{docker push \$REGION-docker.pkg.dev/\$PROJ/nutrihub/frontend:latest}
+    \end{itemize}
+  \item \textbf{Roll out deployments}  
+    \begin{itemize}
+      \item \texttt{kubectl rollout restart deploy/backend deploy/frontend -n nutrihub}
+    \end{itemize}
+  \item \textbf{(Optional) Adjust backend resources for tests}  
+    \begin{itemize}
+      \item \texttt{kubectl set resources deploy/backend -n nutrihub \textbackslash{}}
+      \item \texttt{\ \ --requests=cpu=500m,memory=512Mi --limits=cpu=500m,memory=1Gi}
+      \item Adjust as needed for other iterations; HPA lives in the manifest.
+    \end{itemize}
+  \item \textbf{Run Locust load test}  
+    \begin{itemize}
+      \item \texttt{locust -f locustfile.py --host http://136.110.255.27}
+      \item Configure users/ramp in the UI; collect CSV/graphs for analysis.
+    \end{itemize}
+  \item \textbf{Deploy Cloud Functions}  
+    \begin{itemize}
+      \item From each function folder under \texttt{gcp-functions/}:  
+      \item \texttt{gcloud functions deploy <name> --runtime=python311 --trigger-topic=<topic>} (or HTTP trigger)  
+      \item Ensure env/secrets and bucket names align with the Terraform outputs.
+    \end{itemize}
+\end{enumerate}
+
+\section{Load Testing}
+
+\subsection*{Methodology Note (minor tuning not shown)}
+In addition to the three documented experiments below, we made several smaller configuration adjustments while troubleshooting and validating the system under load (e.g., iterating on backend CPU/memory \textit{requests/limits}, adjusting HPA bounds, attempting node-pool resize/new pool creation under quota constraints, and fixing frontend API base URL configuration). We do not enumerate every minor tweak in this report because many of them were transient, not run as full controlled experiments with the same duration/parameters, and would add noise without improving the main performance narrative. Instead, we present the three runs where we captured complete artifacts (Locust metrics + graphs + Cloud Monitoring screenshots) and kept settings stable for the duration of each run, which supports clear bottleneck identification and comparative analysis.
+
+\subsection{Initial Trial (baseline, small pool)}
+
+\subsubsection*{Test setup}
+\begin{itemize}
+  \item \textbf{Scenario}: Locust UI (HTTP). Endpoints: \texttt{/}, \texttt{/api/foods/}, \texttt{/api/time?name=locust}, \texttt{/api/healthz/}. The external \texttt{/api/foods/random-meal/} endpoint was excluded to avoid third-party latency dominating results.
+  \item \textbf{Load pattern}: 800 users, spawn rate 50 users/s, runtime 10 minutes.
+  \item \textbf{Target}: GKE Ingress / Load Balancer at \texttt{http://136.110.255.27}.
+  \item \textbf{Backend deployment (baseline)}: 3\,$\times$\,e2-medium node pool (2 vCPU / 4 GiB each). Backend pods limited to \(\sim\)500m CPU each. HPA min=2, max=6, target CPU=60\%. MySQL runs on an e2-micro VM.
+\end{itemize}
+
+\subsubsection*{Key metrics (Locust UI)}
+\begin{itemize}
+  \item \textbf{Throughput}: \(\sim\)100--150 req/s steady.
+  \item \textbf{Latency}:
+    \begin{itemize}
+      \item \texttt{/}: median \(\sim\)110 ms, p95 \(\sim\)110 ms.
+      \item \texttt{/api/foods/}: median \(\sim\)6.8 s, p95 \(\sim\)18 s, p99 \(\sim\)22 s.
+      \item \texttt{/api/healthz/} and \texttt{/api/time?name=locust}: similar to \texttt{/api/foods/} (median \(\sim\)6.5--6.6 s, p95 \(\sim\)18 s, p99 \(\sim\)22 s).
+      \item Aggregated: median \(\sim\)1.1 s, p95 \(\sim\)17 s, p99 \(\sim\)21 s.
+    \end{itemize}
+  \item \textbf{Errors}: 2,352 of 73,844 requests failed.
+\end{itemize}
+
+\subsubsection*{Infra/resource observations (Cloud Monitoring)}
+\begin{itemize}
+  \item \textbf{Backend HPA}: scaled to max=6 and stayed pinned for the run (ScalingLimited=True).
+  \item \textbf{Backend pod CPU}: \(\sim\)0.5 cores per pod (matches the 500m limit), flat-topped $\Rightarrow$ CPU-limited/throttled. Pod memory \(\sim\)900 MiB, stable.
+  \item \textbf{Nodes}: one node \(\sim\)1.0--1.2 cores (about 60\% of e2-medium), others \(\sim\)0.5--0.7 cores $\Rightarrow$ cluster had spare headroom, but pod CPU limits prevented using it.
+  \item \textbf{Load balancer}: request rate \(\sim\)100--150 rps; latency rose to \(\sim\)2--3 s; 5xx spikes during peak.
+  \item \textbf{MySQL VM (e2-micro)}: CPU \(\sim\)10--20\%, memory \(\sim\)8.8 GiB steady, disk IO \(\sim\)1.5 MiB/s $\Rightarrow$ DB not saturated.
+  \item \textbf{Frontend API base fix}: frontend was rebuilt with \texttt{VITE\_API\_BASE\_URL=http://136.110.255.27/api} to fix 405s caused by missing \texttt{/api/} prefix.
+\end{itemize}
+
+\subsubsection*{Interpretation (bottleneck)}
+\begin{itemize}
+  \item The application tier is the bottleneck: each backend pod is capped at 500m CPU and the HPA maxed out at 6 replicas, constraining total backend compute.
+  \item Nodes still had free CPU and MySQL stayed healthy, while latency and LB 5xx increased under load $\Rightarrow$ classic pod CPU saturation/throttling and insufficient replica ceiling.
+\end{itemize}
+
+\subsubsection*{Infra constraints observed}
+\begin{itemize}
+  \item Regional \texttt{IN\_USE\_ADDRESSES} quota was 4. Capacity experiments were constrained by quota, and we later created a separate larger pool (\texttt{bigger-pool}) while keeping the same Ingress IP.
+\end{itemize}
+
+\subsubsection*{Planned remediation test (iteration 2)}
+\begin{itemize}
+  \item \textbf{Objective}: relieve backend CPU throttling and demonstrate improved p95/p99 and fewer 5xx.
+  \item \textbf{Planned backend resources}: requests 600m CPU / 900Mi; limits 1 vCPU / 1.5 GiB; 2 replicas.
+  \item \textbf{HPA}: min=2, max=6, target CPU=60\%.
+  \item \textbf{Planned load}: 600 users, spawn rate 30 users/s, duration 5 minutes (same endpoints).
+  \item \textbf{Success criteria}: lower p95/p99 on \texttt{/api/foods/}, reduced LB 5xx, backend pods not pinned at 100\% of request; HPA scales within 2--4 as needed.
+\end{itemize}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/initial state/locust charts.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/initial state/locust stats.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/initial state/GOOGLE MONITOR.png}}
+  \caption{Initial trial: Locust charts, Locust stats, GCP monitoring.}
+\end{figure}
+
+\subsection{First Iteration (Post--Node Pool Upgrade)}
+
+\subsubsection*{What changed}
+\begin{itemize}
+  \item Switched to a new, larger node pool (\texttt{bigger-pool}), keeping the same Ingress IP (\texttt{136.110.255.27}).
+  \item Backend stayed at 500m CPU / 1Gi limits and 250m / 512Mi requests (2 replicas); HPA set to min=2, max=4, target CPU=60\%.
+  \item Frontend rebuilt with \texttt{VITE\_API\_BASE\_URL=http://136.110.255.27/api} to fix missing \texttt{/api/} prefix and prevent 405 errors.
+\end{itemize}
+
+\subsubsection*{Test setup}
+\begin{itemize}
+  \item Locust UI, endpoints: \texttt{/}, \texttt{/api/foods/}, \texttt{/api/time?name=locust}, \texttt{/api/healthz/}.
+  \item Load: \(\sim\)800 users (steady), spawn rate as configured in UI, runtime \(\sim\)5 minutes.
+  \item Target: \texttt{http://136.110.255.27} (Ingress).
+\end{itemize}
+
+\subsubsection*{Key results (Locust)}
+\begin{itemize}
+  \item \textbf{Throughput}: peaked \(\sim\)450--500 req/s then flattened \(\sim\)120--150 req/s.
+  \item \textbf{Latency}:
+    \begin{itemize}
+      \item \texttt{/}: median \(\sim\)110 ms, p95 \(\sim\)120--150 ms.
+      \item \texttt{/api/foods/}: median \(\sim\)3.6 s, p95 \(\sim\)19 s, p99 \(\sim\)33 s.
+      \item \texttt{/api/healthz/}: median \(\sim\)3.3 s, p95 \(\sim\)19 s, p99 \(\sim\)31 s.
+      \item \texttt{/api/time?name=locust}: median \(\sim\)3.4 s, p95 \(\sim\)18 s, p99 \(\sim\)31 s.
+      \item Aggregated: median \(\sim\)390 ms, p95 \(\sim\)16 s, p99 \(\sim\)27 s.
+    \end{itemize}
+  \item \textbf{Failures}: 0.
+\end{itemize}
+
+\subsubsection*{Infra/resource observations (Cloud Monitoring)}
+\begin{itemize}
+  \item Nodes (\texttt{bigger-pool}): CPU low overall; brief bump early then \(\sim\)10--20\% CPU. Memory ample.
+  \item HPA: scaled up to 4 replicas briefly, then back down; min=2, max=4 in effect.
+  \item Backend pods: CPU briefly spiked, then low; memory \(\sim\)200--300 MiB. No sustained node CPU pressure.
+  \item Load balancer: latency peaked then declined; request rate flattened \(\sim\)150 rps.
+  \item MySQL VM: CPU modest (\(\sim\)10--20\%), memory stable (\(\sim\)12--13 GiB), disk IO low.
+\end{itemize}
+
+\subsubsection*{Interpretation}
+\begin{itemize}
+  \item Despite larger nodes and frontend fix, backend latency remained high (p95 up to \(\sim\)19--33 s) and RPS flattened because backend pods were still constrained at 500m CPU and only 2--4 replicas.
+  \item DB and nodes were not saturated. The bottleneck remained in the backend tier (insufficient per-pod CPU and replica headroom), not in Locust or MySQL.
+\end{itemize}
+
+\subsubsection*{Next steps}
+\begin{itemize}
+  \item Apply higher backend pod resources: requests 1 vCPU / 1.5 GiB; limits 2 vCPU / 2 GiB; restart deployment.
+  \item Increase HPA headroom: min=2, max=8, target CPU=60\%.
+  \item Re-run a push 10-minute test with higher load (1500 users, spawn rate 100/s) and compare p95/p99 and RPS.
+  \item If latency persists after more CPU/replicas, inspect app/DB paths (slow queries, external calls), since node/VM headroom is not the limiter.
+\end{itemize}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/First iteration/locust charts.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/First iteration/locust stats.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/First iteration/GOOGLE MONITOR.png}}
+  \caption{First iteration: Locust charts, Locust stats, GCP monitoring.}
+\end{figure}
+
+\subsection{Second Iteration (post--resource bump, 15k-user push)}
+
+\subsubsection*{What changed}
+\begin{itemize}
+  \item Backend pod resources increased to requests 1 vCPU / 1.5 GiB, limits 2 vCPU / 2 GiB.
+  \item HPA headroom raised to min=2, max=8, target CPU=60\% (HPA requested up to 8).
+  \item New larger node pool (\texttt{bigger-pool}) in place; frontend rebuilt with correct API base.
+\end{itemize}
+
+\subsubsection*{Test setup}
+\begin{itemize}
+  \item Locust UI, endpoints: \texttt{/}, \texttt{/api/foods/}, \texttt{/api/time?name=locust}, \texttt{/api/healthz/}.
+  \item Load: \(\sim\)15{,}000 users (aggressive push), spawn ramp in UI, duration \(\sim\)5--10 minutes.
+  \item Target: \texttt{http://136.110.255.27} (Ingress).
+\end{itemize}
+
+\subsubsection*{Key results (Locust)}
+\begin{itemize}
+  \item \textbf{Throughput}: burst into \(\sim\)700--900 rps; sustained \(\sim\)700--800 rps with high failures during the plateau.
+  \item \textbf{Latency (latest run table)}:
+    \begin{itemize}
+      \item \texttt{/}: median 7.2 s, p95 22 s, p99 50 s.
+      \item \texttt{/api/foods/}: median 7.5 s, p95 37 s, p99 74 s.
+      \item \texttt{/api/healthz/} / \texttt{/api/time}: median 7.5 s, p95 37 s, p99 72--77 s.
+      \item Aggregated: median 7.4 s, p95 33 s, p99 62 s.
+    \end{itemize}
+  \item \textbf{Failures}: \(\sim\)112k failures (111{,}937) out of \(\sim\)209k requests; failures rose as soon as the plateau started.
+\end{itemize}
+
+\subsubsection*{Infra/resource observations (Cloud Monitoring \& logs)}
+\begin{itemize}
+  \item HPA requested 7--8 pods, but cluster-autoscaler scale-up failed: \texttt{CPUS\_ALL\_REGIONS} quota exceeded and node-pool max=3. Only 4 pods remained Running; additional replicas stayed Pending or were deleted.
+  \item Nodes (\texttt{bigger-pool}): CPU low (\(\sim\)18\% / 9\%); memory ample.
+  \item Backend pods: CPU modest (\(\sim\)100--260m); numerous readiness/liveness probe timeouts during peak; Gunicorn worker timeouts (\texttt{WORKER TIMEOUT}, ``no URI read'', SIGKILL).
+  \item Load balancer latency climbed with failures; request rate flattened once errors surged.
+  \item MySQL VM: CPU/memory/IO modest---DB not the bottleneck.
+\end{itemize}
+
+\subsubsection*{Interpretation}
+\begin{itemize}
+  \item At \(\sim\)15k users the backend could not keep up: p95 33--62 s and \(>100{,}000\) failures. HPA asked for up to 8 replicas, but autoscaler was blocked by quota (\texttt{CPUS\_ALL\_REGIONS}) and node-pool max=3, so extra pods could not land; existing pods then timed out (Gunicorn worker timeouts, probe failures).
+  \item Nodes and DB were not saturated---capacity was capped by quota and app timeouts under overload.
+\end{itemize}
+
+\subsubsection*{Decision}
+\begin{itemize}
+  \item This was an experimental push run. Increasing capacity would require higher CPU quotas and/or larger nodes, which we are not pursuing.
+  \item We will revert to the original smaller node pool plan (3\,$\times$\,e2-medium) for ongoing use and documentation.
+\end{itemize}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/Second iteration/locust charts.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/Second iteration/locust stats.png}}
+  \includegraphics[width=0.32\linewidth]{\detokenize{CMPE 48A REPORT IMAGES/Second iteration/GOOGLE MONITOR.png}}
+  \caption{Second iteration: Locust charts, Locust stats, GCP monitoring.}
+\end{figure}
+
+\subsection{Cross-Run Interpretation}
+\begin{itemize}
+  \item Backend CPU limits/replica ceilings dominated p95 and throughput in all runs; larger nodes alone did not help.
+  \item Scaling up pod resources without available cluster quota led to failures (iteration 2): HPA asked for pods that could not schedule; timeouts followed.
+  \item DB and nodes remained healthy across runs; bottleneck is backend capacity and timeouts.
+  \item Decision: revert to the small, cost-bound node pool and avoid further scale-up unless quotas/costs change.
+\end{itemize}
+
+\section{Cost Estimation (3 Months)}
+\subsection{GKE Standard Cluster}
+\begin{itemize}
+  \item Node type: \texttt{e2-medium} (2 vCPU, 4\,GiB RAM).
+  \item Approx.\ \$34/month per node (if running continuously).
+  \item 3-node pool (used only during development/testing).
+  \item Optimized active usage assumption: cluster active 120 hours/month.
+  \item Estimated monthly GKE compute:
+    \[
+      120~\mathrm{h} \times 3 \times 0.047~\mathrm{USD/h} \approx 16.9~\mathrm{USD/month} \approx 17~\mathrm{USD/month}
+    \]
+\end{itemize}
+
+\subsection{MySQL VM}
+\begin{itemize}
+  \item Instance: \texttt{e2-micro}.
+  \item Cost: \(\sim\)\$7--8 per month (\(\sim\)\$21--24 over 3 months).
+\end{itemize}
+
+\subsection{Load Balancer, Logs, and Network}
+\begin{itemize}
+  \item Cloud Load Balancer + logging: \(\sim\)\$10 per month (\(\sim\)\$30 over 3 months).
+\end{itemize}
+
+\subsection{Cloud Storage}
+\begin{itemize}
+  \item 20\,GiB storage budget.
+  \item Cost: \(\sim\)\$0.40 per month (\(\sim\)\$1.20 over 3 months).
+\end{itemize}
+
+\subsection{Cloud Functions}
+\begin{itemize}
+  \item Light usage stays within the free tier.
+  \item Cost: \$0 (for this project usage pattern).
+\end{itemize}
+
+\subsection{Locust VM (Load Testing)}
+\begin{itemize}
+  \item Instance: \texttt{e2-standard-2}.
+  \item Usage: 20 hours total.
+  \item Estimated cost:
+    \[
+      0.083~\mathrm{USD/h} \times 20~\mathrm{h} \approx 1.66~\mathrm{USD} \approx 1.6~\mathrm{USD}
+    \]
+\end{itemize}
+
+\subsection{Total Estimated Cost (3 Months)}
+\begin{itemize}
+  \item GKE (optimized): \(\sim\)\$51
+  \item MySQL VM: \(\sim\)\$21--24
+  \item Load Balancer + logs: \(\sim\)\$30
+  \item Cloud Storage: \(\sim\)\$1.2
+  \item Cloud Functions: \$0
+  \item Locust VM: \(\sim\)\$1.6
+  \item Total: \(\sim\)\$70--80 (3 months), which fits within the Google Cloud Free Trial credit (\$300).
+\end{itemize}
+
+\end{document}

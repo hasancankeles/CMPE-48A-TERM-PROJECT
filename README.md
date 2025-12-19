@@ -27,6 +27,49 @@ NutriHub is a comprehensive platform that helps users discover and manage afford
 - Frontend (React + TypeScript)
 - Backend (Django)
 - Mobile App (React Native)
+- Infra: GCP (GKE + MySQL VM + Artifact Registry) via Terraform and Kubernetes YAMLs
+- Load test: Locust (script at `locustfile.py`)
+
+## Cloud deployment (GCP, small node pool)
+This repo already contains everything the instructor asks for:
+- Application source (`backend/`, `frontend/`, `mobile/`)
+- Terraform IaC (`infra/terraform/`) for GKE, MySQL VM, Artifact Registry, static IP
+- Kubernetes manifests (`deploy/gke/k8s-manifests.yaml`) for backend/frontend/HPA/Ingress
+- Locust test script (`locustfile.py`)
+- Cloud Functions code (`gcp-functions/`), e.g. `login_email_sender`, `image_cache_subscriber`, `badge_calculator`
+- Buckets for static/media and caches (default names in manifests/Terraform)
+
+Deploy with the *smaller* pool defaults (3× e2-medium):
+```bash
+# 1) Provision infra (defaults: 3 nodes, e2-medium, 30GB)
+cd infra/terraform
+terraform init
+terraform apply -var "project_id=YOUR_PROJECT_ID"
+
+# 2) Get kubeconfig and apply manifests (edit MYSQL_HOST/bucket if needed)
+gcloud container clusters get-credentials nutrihub --zone europe-west1-b --project YOUR_PROJECT_ID
+kubectl apply -f deploy/gke/k8s-manifests.yaml
+
+# 3) Build/push images to Artifact Registry (keeps small pool)
+REGION=europe-west1
+PROJ=YOUR_PROJECT_ID
+docker build -t $REGION-docker.pkg.dev/$PROJ/nutrihub/backend:latest backend
+docker push $REGION-docker.pkg.dev/$PROJ/nutrihub/backend:latest
+docker build -t $REGION-docker.pkg.dev/$PROJ/nutrihub/frontend:latest frontend \
+  --build-arg VITE_API_BASE_URL=http://136.110.255.27/api
+docker push $REGION-docker.pkg.dev/$PROJ/nutrihub/frontend:latest
+kubectl rollout restart deploy/backend deploy/frontend -n nutrihub
+
+# 4) (Optional) Run Locust from the repo
+pip install locust
+locust -f locustfile.py --host http://136.110.255.27
+```
+
+Buckets and Cloud Functions:
+- Default static/media bucket: `nutrihub-static-media` (set in `infra/terraform` and `deploy/gke/k8s-manifests.yaml`).
+- Cloud Functions source lives in `gcp-functions/`. Deploy with `gcloud functions deploy <name> --runtime=python311 --trigger-topic=<topic>` (adjust to the function’s trigger: pub/sub or HTTP) and point them at the same project.
+
+Terraform defaults already reflect the smaller node pool (e2-medium, count=3); leave them as-is if you do not want a bigger pool.
 
 ## Prerequisites
 - Docker and Docker Compose
