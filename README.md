@@ -29,13 +29,14 @@ NutriHub is a comprehensive platform that helps users discover and manage afford
 - Mobile App (React Native)
 - Infra: GCP (GKE + MySQL VM + Artifact Registry) via Terraform and Kubernetes YAMLs
 - Load test: Locust (script at `locustfile.py`)
+- Load test variants: additional Locust scripts under `locust/`
 
 ## Cloud deployment (GCP, small node pool)
 This repo already contains everything the instructor asks for:
 - Application source (`backend/`, `frontend/`, `mobile/`)
 - Terraform IaC (`infra/terraform/`) for GKE, MySQL VM, Artifact Registry, static IP
 - Kubernetes manifests (`deploy/gke/k8s-manifests.yaml`) for backend/frontend/HPA/Ingress
-- Locust test script (`locustfile.py`)
+- Locust test scripts (`locustfile.py` and `locust/`)
 - Cloud Functions code (`gcp-functions/`), e.g. `login_email_sender`, `image_cache_subscriber`, `badge_calculator`
 - Buckets for static/media and caches (default names in manifests/Terraform)
 
@@ -63,6 +64,10 @@ kubectl rollout restart deploy/backend deploy/frontend -n nutrihub
 # 4) (Optional) Run Locust from the repo
 pip install locust
 locust -f locustfile.py --host http://136.110.255.27
+
+# Alternative scenarios (see locust/README.md):
+locust -f locust/infra_only.py --host http://136.110.255.27
+locust -f locust/baseline_web_mix.py --host http://136.110.255.27
 ```
 
 Buckets and Cloud Functions:
